@@ -1,0 +1,5 @@
+results/
+config/default_config.yaml
+tests/
+pytest.ini
+*__pycache__*
