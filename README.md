@@ -4,7 +4,7 @@ This repository contains a unified framework to run model editing datasets along
 The datasets used in this benchmark can be found in the [data](https://github.com/oneSebastian/model-editing-data) repository.
 
 ## Installation
-Install the `model_editing` package with `pip install -e .` together with the dependencies in `requirements.txt` or use use the code directly.
+Install the `model_editing` package with `pip install -e .` together with the dependencies in `requirements.txt` or use use the code directly. Befure usage create `config/default_config.yaml` following the lines of the example config.
 
 ## Usage
 The scripts `example_evaluation.sh` and `example_analysis.sh` give examples of how to evaluate a model on a given set of editors, model editing datasets and control tasks. And how to get a basic overview over the evaluation results. The EvalResult class from `model_editing/analysis.py` can be used to load pandas dataframes of the evaluation results for a more fine-grained analysis using the methods *load_editing_data*, *aggregate_editing_data* and *load_aggregated_control_data* respectively.
