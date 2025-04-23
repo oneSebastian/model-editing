@@ -137,7 +137,7 @@ class EvalResult():
         '''
     
     @staticmethod
-    def extrtact_metrics_from_control_eval_result(doc):
+    def extrtact_metrics_from_control_result(doc):
         full_metrics = dict()
         # print(doc)
         for task in doc["results"].keys():
@@ -166,7 +166,7 @@ class EvalResult():
             if str(path).endswith("_lm.parquet"):
                 df = pd.read_parquet(path)
                 for _, row in tqdm(df.iterrows(), total=len(df), desc=f"Loading from path={path}"):
-                    for task, metrics in EvalResult.extrtact_metrics_from_control_eval_result(row).items():
+                    for task, metrics in EvalResult.extrtact_metrics_from_control_result(row).items():
                         for metric, data in metrics.items():
                             key = (row["model"], row["editor"], task, metric)
 

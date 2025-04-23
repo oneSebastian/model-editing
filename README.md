@@ -2,7 +2,7 @@
 This repository contains a unified framework to run model editing datasets alongside with [LM Evaluation Harness](https://github.com/EleutherAI/lm-evaluation-harness) control tasks on various model editors. It is designed to be easily extendable with support for additional models, model editors, and evaluation datasets.
 
 ## Installation
-Install all required packages.
+Install the `model_editing` package with `pip install -e .` together with the dependencies in `requirements.txt` or use use the code directly.
 
 ## Usage
 The scripts `example_evaluation.sh` and `example_analysis.sh` give examples of how to evaluate a model on a given set of editors, model editing datasets and control tasks. And how to get a basic overview over the evaluation results. The EvalResult class from `model_editing/analysis.py` can be used to load pandas dataframes of the evaluation results for a more fine-grained analysis using the methods *load_editing_data*, *aggregate_editing_data* and *load_aggregated_control_data* respectively.

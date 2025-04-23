@@ -3,3 +3,4 @@ config/default_config.yaml
 tests/
 pytest.ini
 *__pycache__*
+model_editing.egg-info/

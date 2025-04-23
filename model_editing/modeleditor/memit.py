@@ -42,9 +42,9 @@ class MEMITModel(EditModel):
         # TODO: adapt for sequential editing
         requests = [self._format_fact_for_rome(fact) for fact in facts]
         if self._model_name == "gpt-j":
-            hparams = MEMITHyperParams.from_json(f'ke_benchmark/modeleditor/rome_style/hparams/MEMIT/EleutherAI_gpt-j-6B.json')
+            hparams = MEMITHyperParams.from_json(f'model_editing/modeleditor/rome_style/hparams/MEMIT/EleutherAI_gpt-j-6B.json')
         else:
-            hparams = MEMITHyperParams.from_json(f'ke_benchmark/modeleditor/rome_style/hparams/MEMIT/{self._model_name}.json')
+            hparams = MEMITHyperParams.from_json(f'model_editing/modeleditor/rome_style/hparams/MEMIT/{self._model_name}.json')
         _, self._changed_weights = apply_memit_to_model(self._model, self.tokenizer, requests, hparams, return_orig_weights=True)
 
 
