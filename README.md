@@ -1,6 +1,8 @@
 # Model Editing
 This repository contains a unified framework to run model editing datasets alongside with [LM Evaluation Harness](https://github.com/EleutherAI/lm-evaluation-harness) control tasks on various model editors. It is designed to be easily extendable with support for additional models, model editors, and evaluation datasets.
 
+The datasets used in this benchmark can be found in the [data](https://github.com/oneSebastian/model-editing-data) repository.
+
 ## Installation
 Install the `model_editing` package with `pip install -e .` together with the dependencies in `requirements.txt` or use use the code directly.
 
