@@ -1,6 +1,13 @@
+*__pycache__*
 results/
+data/stats/
 config/default_config.yaml
 tests/
 pytest.ini
-*__pycache__*
 model_editing.egg-info/
+nohup.out
+
+# ignore all datasets other than RippleEdits
+data/datasets/*
+!data/datasets/RippleEdits/
+!data/datasets/RippleEdits/**

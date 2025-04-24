@@ -9,7 +9,7 @@ import numpy as np
 from collections import defaultdict
 from lm_eval import evaluate
 from .models import load_model
-from .modeleditor import NoEditModel, InContextModel, MEMITModel, ContextRetrieverModel
+from .model_editor import NoEditModel, InContextModel, MEMITModel, ContextRetrieverModel
 from .editing_tasks.util import TestCondition, QueryType
 from copy import deepcopy
 

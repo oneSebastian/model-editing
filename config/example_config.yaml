@@ -1,4 +1,4 @@
 # create config/default_config.yaml following this example with your settings
 
-dataset_base_path: /path/to/your/data/datasets
-results_dir: /path/to/this/repo/or/somewhere/else/model-editing/results
+dataset_base_path: data/datasets/
+results_dir: results/

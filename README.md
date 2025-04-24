@@ -4,7 +4,19 @@ This repository contains a unified framework to run model editing datasets along
 The datasets used in this benchmark can be found in the [data](https://github.com/oneSebastian/model-editing-data) repository.
 
 ## Installation
-Install the `model_editing` package with `pip install -e .` together with the dependencies in `requirements.txt` or use use the code directly. Befure usage create `config/default_config.yaml` following the lines of the example config.
+Install the `model_editing` package with `pip install -e .` together with the dependencies in `requirements.txt` or use use the code directly. Before usage create `config/default_config.yaml` following the lines of the example config.
+
+## Datasets
+This model editing benchmark by default includes a number of knowledge editing datasets. We distribute a slightly augmented version of *RippleEdits* with this repository. The other datasets are downloaded as they are needed.
+
+- **RippleEdits:**  
+  The *RippleEdits* dataset was released by [Cohen et al. (2023)](https://arxiv.org/abs/2307.12976). The original data can be found [here](https://github.com/edenbiran/RippleEdits). We use and distribute here an augmented version of the dataset. The authors' implementation contains calls to the wikidata API to resolve entitiy codes into entitiy labels. We resolved the API calls and added the entity labels where possible, thus creating the extended static dataset distributed here.
+
+- **zsRE and CounterFact:**
+  We use the same dataset splits as [Meng et al. (2023)](https://arxiv.org/abs/2202.05262). We use the datasets distributed by them [here](https://rome.baulab.info/data/). The *CounterFact* dataset was created by them. The *zsRE* dataset was first created by [Levy et al. (2017)](https://aclanthology.org/K17-1034/).
+
+- **MQuAKE:**
+  The *MQuAKE* dataset was released by [Zhong et al. (2024)](https://arxiv.org/abs/2305.14795). The data can be found [here](https://github.com/princeton-nlp/MQuAKE).
 
 ## Usage
 The scripts `example_evaluation.sh` and `example_analysis.sh` give examples of how to evaluate a model on a given set of editors, model editing datasets and control tasks. And how to get a basic overview over the evaluation results. The EvalResult class from `model_editing/analysis.py` can be used to load pandas dataframes of the evaluation results for a more fine-grained analysis using the methods *load_editing_data*, *aggregate_editing_data* and *load_aggregated_control_data* respectively.

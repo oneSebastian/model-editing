@@ -1,4 +1,6 @@
 import os
+import requests
+from pathlib import Path
 from typing import Optional, Union
 from itertools import product
 from .evaluator import Evaluator
@@ -11,15 +13,15 @@ from .control_tasks.load_lm_eval import load_control_task_dict
 from .editing_tasks.util import QueryType
 
 
-def load_dataset(dataset_base_path, control_task, split=None, sample_size=None, force_query_type=None):
+def load_dataset(dataset_base_path, editing_task, split=None, sample_size=None, force_query_type=None):
     limit = sample_size if sample_size else 0
-    if control_task == "RippleEdits":
+    if editing_task == "RippleEdits":
         dataset = RippleEditsDataset.from_file(f"{dataset_base_path}/RippleEdits/", split=split, limit=limit, force_query_type=force_query_type)
-    elif control_task == "MQuAKE":
+    elif editing_task == "MQuAKE":
         dataset = MQuAKEDataset.from_file(f"{dataset_base_path}/MQuAKE/", split=split, limit=limit, force_query_type=force_query_type)
-    elif control_task == "CounterFact":
+    elif editing_task == "CounterFact":
         dataset = CounterFactDataset.from_file(f"{dataset_base_path}/CounterFact/", limit=limit, force_query_type=force_query_type)
-    elif control_task == "zsRE":
+    elif editing_task == "zsRE":
         dataset = ZSREDataset.from_file(f"{dataset_base_path}/zsRE/", limit=limit, force_query_type=force_query_type)
     else:
         raise ValueError("This benchmark only supports the datasets RippleEdits, MQuAKE, CounterFact and zsRE.")
@@ -60,9 +62,35 @@ def run_experiment(
 
     # run evaluation for this experiment
     evaluator.evaluate()
-    result_path = f"{save_path}{experiment_name}"
+    result_path = f"{save_path}/{experiment_name}"
     evaluator.save_results(save_path=result_path)
     print(f"results saved at {result_path}")
+
+
+def download_dataset(dataset, dataset_path):
+    if dataset == "zsRE":
+        url = "https://rome.baulab.info/data/dsets/zsre_mend_eval.json"
+        print(f"Downloading {dataset} from {url}")
+        response = requests.get(url)
+        response.raise_for_status()
+        with open(f"{dataset_path}/zsre_mend_eval.json", "w", encoding="utf-8") as f:
+            f.write(response.text)
+    elif dataset == "CounterFact":
+        url = "https://rome.baulab.info/data/dsets/counterfact.json"
+        print(f"Downloading {dataset} from {url}")
+        response = requests.get(url)
+        response.raise_for_status()
+        with open(f"{dataset_path}/counterfact.json", "w", encoding="utf-8") as f:
+            f.write(response.text)
+    elif dataset == "MQuAKE":
+        url = "https://raw.githubusercontent.com/princeton-nlp/MQuAKE/main/datasets/MQuAKE-CF-3k-v2.json"
+        print(f"Downloading {dataset} from {url}")
+        response = requests.get(url)
+        response.raise_for_status()
+        with open(f"{dataset_path}/MQuAKE-CF-3k-v2.json", "w", encoding="utf-8") as f:
+            f.write(response.text)
+    else:
+        raise NotImplementedError(f"Download of dataset {dataset} not supported.")
 
 
 def benchmark_knowledge_editing(
@@ -79,6 +107,13 @@ def benchmark_knowledge_editing(
     save_path: str,
     device: str,
 ):
+    # check if benchmark datasets are available. If not download them.
+    for editing_task in editing_tasks:
+        path = Path(dataset_base_path + editing_task + "/")
+        if not path.exists():
+            path.mkdir(parents=True, exist_ok=True)
+            download_dataset(editing_task, path)
+
     #TODO: handle warning
     '''
     huggingface/tokenizers: The current process just got forked, after parallelism has already been used. Disabling parallelism to avoid deadlocks...
