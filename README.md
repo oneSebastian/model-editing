@@ -1,5 +1,5 @@
 # Model Editing
-This repository contains a unified framework to run model editing datasets alongside with [LM Evaluation Harness](https://github.com/EleutherAI/lm-evaluation-harness) control tasks on various model editors. It is designed to be easily extendable with support for additional models, model editors, and evaluation datasets. The *MEMIT* model editor was developed by [Mend eg al. (2023)](https://arxiv.org/abs/2210.07229) and the implementation is adapted from [here](https://github.com/kmeng01/memit).
+This repository contains a unified framework to run model editing datasets alongside with [LM Evaluation Harness](https://github.com/EleutherAI/lm-evaluation-harness) control tasks on various model editors. It is designed to be easily extendable with support for additional models, model editors, and evaluation datasets. The *MEMIT* model editor was developed by [Meng et al. (2023)](https://arxiv.org/abs/2210.07229) and the implementation is adapted from [here](https://github.com/kmeng01/memit).
 
 ## Installation
 Install the `model_editing` package with `pip install -e .` together with the dependencies in `requirements.txt` or use use the code directly. Before usage create `config/default_config.yaml` following the lines of the example config.
