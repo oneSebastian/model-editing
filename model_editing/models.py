@@ -4,6 +4,7 @@ from transformers import (
     GPTJForCausalLM,
     LlamaForCausalLM,
     GPTNeoXForCausalLM,
+    AutoModelForCausalLM,
 )
 
 def load_model(model_name, device="cuda"):
@@ -23,6 +24,11 @@ def load_model(model_name, device="cuda"):
         tokenizer = AutoTokenizer.from_pretrained(f'huggyllama/{model_name}', use_fast=False, add_bos_token=False)
         tokenizer.pad_token = tokenizer.eos_token
         model = model = LlamaForCausalLM.from_pretrained(f'huggyllama/{model_name}', device_map="auto", offload_folder="offload", offload_state_dict=True)
+    elif model_name == "qwen_32B":
+        model_name = "Qwen/Qwen2.5-32B"
+        tokenizer = AutoTokenizer.from_pretrained(model_name)
+        tokenizer.pad_token = tokenizer.eos_token
+        model = AutoModelForCausalLM.from_pretrained(model_name, torch_dtype="auto", device_map="auto")
     else:
         raise ValueError(f"{model_name} is not a supported model type.")
     return model.to(device), tokenizer

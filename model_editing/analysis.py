@@ -8,6 +8,7 @@ import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 import plotly.express as px
 
+
 class EvalResult():
     def __init__(self, editing_data=None, control_data=None):
         self.editing_data = editing_data
