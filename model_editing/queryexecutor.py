@@ -50,7 +50,7 @@ class QueryExecutor(HFLM):
         **kwargs,
     ) -> None:
         TemplateLM.__init__(self)
-        self._model = model.to(device)
+        self._model = model
         self._model_name = model_name
         self._device = self._model.device
         self._config = self._model.config
@@ -119,6 +119,41 @@ class QueryExecutor(HFLM):
     @property
     def max_gen_toks(self) -> int:
         return self._max_gen_toks
+    
+
+    def _model_generate(self, context, max_length, stop, **generation_kwargs):
+        # temperature = 0.0 if not set
+        # if do_sample is false and temp==0.0:
+        # remove temperature, as do_sample=False takes care of this
+        # and we don't want a warning from HF
+        generation_kwargs["temperature"] = generation_kwargs.get("temperature", 0.0)
+        do_sample = generation_kwargs.get("do_sample", None)
+
+        # The temperature has to be a strictly positive float -- if it is 0.0, use greedy decoding strategies
+        if generation_kwargs.get("temperature") == 0.0 and do_sample is None:
+            generation_kwargs["do_sample"] = do_sample = False
+
+        if do_sample is False and generation_kwargs.get("temperature") == 0.0:
+            generation_kwargs.pop("temperature")
+        # build stopping criteria
+        stopping_criteria = stop_sequences_criteria(
+            self.tokenizer, stop, context.shape[1], context.shape[0]
+        )
+        #print("DEBUG self._max_gen_toks, _model_generate:", self._max_gen_toks)
+        #print("DEBUG max_length:", max_length)
+        #print("DEBUG generation_kwargs", generation_kwargs)
+        if max_length:
+            generation_kwargs["max_new_tokens"] = None
+        return self.model.generate(
+            input_ids=context,
+            max_length=max_length,
+            # eos_token_id=None, # set eos_token_id to None for forcing target number of generated tokens
+            stopping_criteria=stopping_criteria,
+            pad_token_id=self.tokenizer.pad_token_id,
+            use_cache=True,
+            **generation_kwargs,
+        )
+    
 
     def _create_generate_until_requests(self, queries):
         return [
@@ -166,14 +201,14 @@ class QueryExecutor(HFLM):
                 results[i][length] = result
         return results, query_replies
     
-    def execute_generate_queries(self, queries, answer_length=20, evaluate_generate_lengths=False):
+    def execute_generate_queries(self, queries, answer_length=64, evaluate_generate_lengths=False):
         if evaluate_generate_lengths:
             # no answer length given; generate with length 50, but verify for all shorter lengths as well
             answer_length = 64
             tmp_max_gen_toks = self.max_gen_toks
             self._max_gen_toks = answer_length
             requests = self._create_generate_until_requests(queries)
-            generated = self.generate_until(requests, disable_tqdm=True)
+            generated = self.generate_until(requests)
             self._max_gen_toks = tmp_max_gen_toks
             results, query_replies = self._verify_generate_queries_all_lengths(queries, generated, answer_length)
             return results, query_replies
@@ -182,7 +217,9 @@ class QueryExecutor(HFLM):
             tmp_max_gen_toks = self._max_gen_toks
             self._max_gen_toks = answer_length
             requests = self._create_generate_until_requests(queries)
-            generated = self.generate_until(requests, disable_tqdm=True)
+            # print("DEBUG self._max_gen_toks, execute_generate_queries:", self._max_gen_toks)
+            generated = self.generate_until(requests)
+            # print("DEBUG generated:", generated)
             self._max_gen_toks = tmp_max_gen_toks
             results = self._verify_generate_queries(queries, generated)
             return results
@@ -206,7 +243,7 @@ class QueryExecutor(HFLM):
 
     def execute_options_queries(self, queries):
         requests = self._create_options_requests(queries)
-        responses = self.loglikelihood(requests, disable_tqdm=True)
+        responses = self.loglikelihood(requests, disable_tqdm=False)
         assert len(requests) == len(responses)
 
         # check query responses
@@ -249,8 +286,8 @@ class QueryExecutor(HFLM):
                 torch.cat([inputs[0], torch.full((1, m - inputs[0].shape[1]), pad_token)], dim=1)
                 for inputs in batch_inputs
             ]
-            inputs = torch.cat(padded_inputs, dim=0).to(self._device)
-            attention_mask = torch.where(inputs != pad_token, 1, 0).to(self._device)
+            inputs = torch.cat(padded_inputs, dim=0).to("cuda") # dont put to device but leave it to downstream libraries to resolve
+            attention_mask = torch.where(inputs != pad_token, 1, 0).to("cuda") # dont put to device but leave it to downstream libraries to resolve
             with torch.no_grad():
                 outputs = self._model(inputs, attention_mask=attention_mask)
             logits = outputs.logits

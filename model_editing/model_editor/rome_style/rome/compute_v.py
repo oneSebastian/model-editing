@@ -3,7 +3,7 @@ from typing import Dict, List, Tuple
 import numpy as np
 import torch
 from matplotlib.style import context
-from transformers import AutoModelForCausalLM, AutoTokenizer, LlamaForCausalLM, GPTNeoXForCausalLM
+from transformers import AutoModelForCausalLM, AutoTokenizer, LlamaForCausalLM, GPTNeoXForCausalLM, Qwen2ForCausalLM
 
 from . import repr_tools
 from ..util import nethook
@@ -69,7 +69,7 @@ def compute_v(
     # Set up an optimization over a latent vector that, when output at the
     # rewrite layer, i.e. hypothesized fact lookup location, will induce the
     # target token to be predicted at the final layer.
-    if isinstance(model, LlamaForCausalLM) or isinstance(model, GPTNeoXForCausalLM):
+    if isinstance(model, LlamaForCausalLM) or isinstance(model, GPTNeoXForCausalLM) or isinstance(model, Qwen2ForCausalLM):
         delta = torch.zeros((model.config.hidden_size,), requires_grad=True, device="cuda")
     else:
         delta = torch.zeros((model.config.n_embd,), requires_grad=True, device="cuda")
