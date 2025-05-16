@@ -153,6 +153,7 @@ class Evaluator:
         test_queries_start_time = time.perf_counter()
 
         # Run fact queries
+        print("DEBUG run fact queries")
         queries = defaultdict(list)
         for example_idx, example in enumerate(examples):
             example_result = batch_results[example_idx]
@@ -204,6 +205,7 @@ class Evaluator:
             example_result.dimension_results["fact_queries"].accuracy = accuracy
         
         # Run test queries
+        print("DEBUG run test queries")
         queries = defaultdict(list)
         for example_idx, example in enumerate(examples):
             example_result = batch_results[example_idx]
@@ -292,6 +294,7 @@ class Evaluator:
             example_result.eval_time = test_queries_time
         
         # run control_tasks on edited model
+        print("DEBUG run control tasks")
         if self.control_task_dict is not None:
             # first prepare control_task data for this batch
             batch_task_dict = deepcopy(self.control_task_dict)
@@ -366,7 +369,7 @@ class Evaluator:
                 lm_batch_results = None
         else:
             lm_batch_results = None
-        
+        print("DEBUG batch done")
         # Restore model
         # TODO: we don't support sequential editing at the moment
         #if not self.sequential_editing:

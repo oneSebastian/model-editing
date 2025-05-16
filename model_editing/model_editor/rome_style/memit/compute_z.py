@@ -32,11 +32,16 @@ def compute_z(
         lm_b = nethook.get_parameter(model, f"{hparams.lm_head_module}.bias")
     except LookupError as _:
         lm_b = next(model.parameters()).new_zeros(model.config.vocab_size)
+    
+    # get compute device in case model is distributed
+    calc_device = next(ln_f.parameters()).device
+    # touch calc_device for cuda context creation
+    _ = torch.tensor(0.0).to(calc_device)
 
-    print("Computing right vector (v)")
+    #print("Computing right vector (v)")
 
     # Tokenize target into list of int token IDs
-    target_ids = tok(request["target_new"]["str"], return_tensors="pt").to("cuda")[
+    target_ids = tok(request["target_new"]["str"], return_tensors="pt").to(calc_device)[
         "input_ids"
     ][0]
 
@@ -52,10 +57,10 @@ def compute_z(
         [prompt.format(request["subject"]) for prompt in all_prompts],
         return_tensors="pt",
         padding=True,
-    ).to("cuda")
+    ).to(calc_device)
 
     # Compute rewriting targets
-    rewriting_targets = torch.tensor(-100, device="cuda").repeat(
+    rewriting_targets = torch.tensor(-100, device=calc_device).repeat(
         len(rewriting_prompts), *input_tok["input_ids"].shape[1:]
     )
     for i in range(len(rewriting_prompts)):
@@ -72,27 +77,28 @@ def compute_z(
 
     # Finalize rewrite and loss layers
     loss_layer = max(hparams.v_loss_layer, layer)
-    print(f"Rewrite layer is {layer}")
-    print(f"Tying optimization objective to {loss_layer}")
+    #print(f"Rewrite layer is {layer}")
+    #print(f"Tying optimization objective to {loss_layer}")
 
     # Set up an optimization over a latent vector that, when output at the
     # rewrite layer, i.e. hypothesized fact lookup location, will induce the
     # target token to be predicted at the final layer.
     #delta = torch.zeros((model.config.n_embd,), requires_grad=True, device="cuda")
     if isinstance(model, LlamaForCausalLM) or isinstance(model, GPTNeoXForCausalLM) or isinstance(model, Qwen2ForCausalLM):
-        delta = torch.zeros((model.config.hidden_size,), requires_grad=True, device="cuda")
+        delta = torch.zeros((model.config.hidden_size,), requires_grad=True, device=calc_device)
     else:
-        delta = torch.zeros((model.config.n_embd,), requires_grad=True, device="cuda")
+        delta = torch.zeros((model.config.n_embd,), requires_grad=True, device=calc_device)
     target_init, kl_distr_init = None, None
 
     # Inserts new "delta" variable at the appropriate part of the computation
     def edit_output_fn(cur_out, cur_layer):
         nonlocal target_init
+        cur_out = tuple(_.to(calc_device) for _ in cur_out)
 
         if cur_layer == hparams.layer_module_tmp.format(layer):
             # Store initial value of the vector of interest
             if target_init is None:
-                print("Recording initial value of v*")
+                #print("Recording initial value of v*")
                 # Initial value is recorded for the clean sentence
                 target_init = cur_out[0][0, lookup_idxs[0]].detach().clone()
 
@@ -121,7 +127,7 @@ def compute_z(
             retain_output=True,
             edit_output=edit_output_fn,
         ) as tr:
-            logits = model(**input_tok).logits
+            logits = model(**input_tok).logits.to(calc_device)
 
             # Compute distribution for KL divergence
             kl_logits = torch.stack(
@@ -138,8 +144,12 @@ def compute_z(
         # Compute loss on rewriting targets
         full_repr = tr[hparams.layer_module_tmp.format(loss_layer)].output[0][
             : len(rewriting_prompts)
-        ]
-        log_probs = torch.log_softmax(ln_f(full_repr) @ lm_w + lm_b, dim=2)
+        ].to(calc_device)
+        
+        log_probs = torch.log_softmax(ln_f(full_repr.to(calc_device)) @ lm_w.to(calc_device) + lm_b.to(calc_device), dim=2)
+        rewriting_targets = rewriting_targets.to(calc_device)
+        #log_probs = torch.log_softmax(ln_f(full_repr) @ lm_w + lm_b, dim=2)
+
         loss = torch.gather(
             log_probs,
             2,
@@ -149,20 +159,20 @@ def compute_z(
 
         # Aggregate total losses
         nll_loss_each = -(loss * mask).sum(1) / target_ids.size(0)
-        nll_loss = nll_loss_each.mean()
+        nll_loss = nll_loss_each.mean().to(calc_device)
         kl_loss = hparams.kl_factor * torch.nn.functional.kl_div(
             kl_distr_init, kl_log_probs, log_target=True, reduction="batchmean"
-        )
+        ).to(calc_device)
         weight_decay = hparams.v_weight_decay * (
             torch.norm(delta) / torch.norm(target_init) ** 2
-        )
+        ).to(calc_device)
         # weight_decay = hparams.v_weight_decay * torch.norm(delta) ** 2
         loss = nll_loss + kl_loss + weight_decay
-        print(
-            f"loss {np.round(loss.item(), 3)} = {np.round(nll_loss.item(), 3)} + {np.round(kl_loss.item(), 3)} + {np.round(weight_decay.item(), 3)} "
-            f"avg prob of [{request['target_new']['str']}] "
-            f"{torch.exp(-nll_loss_each).mean().item()}"
-        )
+        #print(
+        #    f"loss {np.round(loss.item(), 3)} = {np.round(nll_loss.item(), 3)} + {np.round(kl_loss.item(), 3)} + {np.round(weight_decay.item(), 3)} "
+        #    f"avg prob of [{request['target_new']['str']}] "
+        #    f"{torch.exp(-nll_loss_each).mean().item()}"
+        #)
         if loss < 5e-2:
             break
 
@@ -180,9 +190,9 @@ def compute_z(
                 delta[...] = delta * max_norm / delta.norm()
 
     target = target_init + delta
-    print(
-        f"Init norm {target_init.norm()} | Delta norm {delta.norm()} | Target norm {target.norm()}"
-    )
+    #print(
+    #    f"Init norm {target_init.norm()} | Delta norm {delta.norm()} | Target norm {target.norm()}"
+    #)
 
     return target
 
@@ -260,10 +270,10 @@ def find_fact_lookup_idx(
         raise ValueError(f"fact_token={fact_token_strategy} not recognized")
 
     sentence = prompt.format(subject)
-    if verbose:
-        print(
-            f"Lookup index found: {ret} | Sentence: {sentence} | Token:",
-            tok.decode(tok(sentence)["input_ids"][ret]),
-        )
+    #if verbose:
+        #print(
+        #    f"Lookup index found: {ret} | Sentence: {sentence} | Token:",
+        #    tok.decode(tok(sentence)["input_ids"][ret]),
+        #)
 
     return ret

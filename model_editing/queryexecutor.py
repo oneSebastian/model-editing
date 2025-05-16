@@ -277,6 +277,7 @@ class QueryExecutor(HFLM):
     def execute_argmax_queries(self, queries):
         argmax_inputs = self.create_argmax_inputs(queries)
         results = []
+        #print("DEBUG self.argmax_batch_size:", self.argmax_batch_size)
         for i in range(0, len(argmax_inputs), self.argmax_batch_size):
             batch_inputs = argmax_inputs[i:min(i + self.argmax_batch_size, len(argmax_inputs))]
             # batch and pad input ids
@@ -286,8 +287,24 @@ class QueryExecutor(HFLM):
                 torch.cat([inputs[0], torch.full((1, m - inputs[0].shape[1]), pad_token)], dim=1)
                 for inputs in batch_inputs
             ]
-            inputs = torch.cat(padded_inputs, dim=0).to("cuda") # dont put to device but leave it to downstream libraries to resolve
-            attention_mask = torch.where(inputs != pad_token, 1, 0).to("cuda") # dont put to device but leave it to downstream libraries to resolve
+            # load tensors to input device in case model is spread
+            input_device = next(self._model.parameters()).device
+            inputs = torch.cat(padded_inputs, dim=0).to(input_device) 
+            attention_mask = torch.where(inputs != pad_token, 1, 0).to(input_device)
+            #print("DEBUG inputs shape:", inputs.shape)
+            with torch.no_grad():
+                outputs = self._model(inputs, attention_mask=attention_mask)
+                logits = outputs.logits
+                max_tokens = torch.argmax(logits, dim=-1)
+                for j, inputs in enumerate(batch_inputs):
+                    _, answer_start, answer_length, answer_tokens = inputs
+                    query_results = []
+                    for k in range(answer_tokens.shape[1]):
+                        query_results.append((max_tokens[j][answer_start - 1 + k] == answer_tokens[0][k]).item())
+                    results.append(query_results)
+            del outputs, logits, max_tokens  # free memory
+            torch.cuda.empty_cache()
+            '''
             with torch.no_grad():
                 outputs = self._model(inputs, attention_mask=attention_mask)
             logits = outputs.logits
@@ -298,6 +315,7 @@ class QueryExecutor(HFLM):
                 for k in range(answer_tokens.shape[1]):
                     query_results.append((max_tokens[j][answer_start - 1 + k] == answer_tokens[0][k]).item())
                 results.append(query_results)
+            '''
         return results
     
     # The base QueryExecutor overwrites loglikelihood_rolling, because in context editors use loglikelihood method instead to compute loglikelihood of request sequence conditional on edit sequence

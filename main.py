@@ -83,7 +83,7 @@ def main():
     eval_parser.add_argument("--config", type=str, default="config/default_config.yaml", help="Path to config file")
 
     analyze_parser = subparsers.add_parser("analyze", help="Analyze results")
-    analyze_parser.add_argument("--results_dir", type=str, required=True, help="Directory of evaluation result files")
+    analyze_parser.add_argument("--results_dir", type=str, default="results/", help="Directory of evaluation result files")
     analyze_parser.add_argument("--groupby_dimension", type=bool, default=False, help="Group results by dataset dimension")
     analyze_parser.add_argument("--groupby_dataset_splits", type=bool, default=False, help="Group results by dataset splits")
     analyze_parser.add_argument("--exclude_fact_queries", type=bool, default=True, help="Exclude fact queries from analysis")
@@ -120,4 +120,7 @@ def main():
     
 
 if __name__ == "__main__":
+    # SEB: on gruenau I should use /home/tmp instead of /tmp
+    import os
+    os.environ['TMPDIR'] = '/home/tmp'
     main()

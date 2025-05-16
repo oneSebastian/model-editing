@@ -5,7 +5,8 @@ config/default_config.yaml
 tests/
 pytest.ini
 model_editing.egg-info/
-nohup.out
+nohup*
+experiments.txt
 
 # ignore all datasets other than RippleEdits
 data/datasets/*
