@@ -27,6 +27,7 @@ class QueryExecutor(HFLM):
             transformers.PreTrainedTokenizer,
             transformers.PreTrainedTokenizerFast,
         ],
+        use_chat_template: bool = False, # SEB: add option to use simple chat template for all queries
         backend: Literal["default", "causal", "seq2seq"] = "causal",
         revision: Optional[str] = "main",
         subfolder: Optional[str] = None,
@@ -56,6 +57,7 @@ class QueryExecutor(HFLM):
         self._config = self._model.config
 
         self.argmax_batch_size = batch_size
+        self.use_chat_template = use_chat_template
 
         # determine which of 'causal' and 'seq2seq' backends to use for HF models
         self._get_backend(
@@ -121,6 +123,26 @@ class QueryExecutor(HFLM):
         return self._max_gen_toks
     
 
+    def apply_chat_to_single_prompt(self, prompt):
+        conversation = [{"role": "user", "content": prompt}]
+        return self.tokenizer.apply_chat_template(
+            conversation,
+            tokenize=False,
+            add_generation_prompt=True,
+        )
+
+
+    def apply_chat_to_prompt_and_model_answer(self, prompt, response):
+        chat_messages = [
+            {"role": "user", "content": prompt},
+            {"role": "assistant", "content": response},
+        ]
+        prompt_only_messages = chat_messages[:-1]
+        full_prompt = self.tokenizer.apply_chat_template(prompt_only_messages, tokenize=False, add_generation_prompt=True)
+        continuation = self.tokenizer.apply_chat_template(chat_messages, tokenize=False)[len(full_prompt):]
+        return full_prompt, continuation
+    
+
     def _model_generate(self, context, max_length, stop, **generation_kwargs):
         # temperature = 0.0 if not set
         # if do_sample is false and temp==0.0:
@@ -160,7 +182,7 @@ class QueryExecutor(HFLM):
             Instance(
                 request_type="generate_until",
                 doc=None,
-                arguments=(queries[i].prompt, {"until": [self.tokenizer.eos_token]}),
+                arguments=(self.apply_chat_to_single_prompt(queries[i].prompt) if self.use_chat_template else queries[i].prompt, {"until": [self.tokenizer.eos_token]}),
                 idx=i,
             ) for i in range(len(queries))
         ]
@@ -231,13 +253,24 @@ class QueryExecutor(HFLM):
             assert (query.answer_options is not None) and (len(query.answer_options) > 1), "options queries require multiple answer options"
             for option in query.answer_options:
                 assert isinstance(option, str)
-                requests.append(
-                    Instance(
-                    request_type="loglikelihood",
-                    doc=None,
-                    arguments=(query.prompt, f" {option}"),
-                    idx=i,
-                ))
+                if self.use_chat_template:
+                    prompt, continuation = self.apply_chat_to_prompt_and_model_answer(query.prompt, option)
+                    requests.append(
+                        Instance(
+                            request_type="loglikelihood",
+                            doc=None,
+                            arguments=(prompt, continuation),
+                            idx=i,
+                        )
+                    )
+                else:
+                    requests.append(
+                        Instance(
+                        request_type="loglikelihood",
+                        doc=None,
+                        arguments=(query.prompt, f" {option}"),
+                        idx=i,
+                    ))
                 i += 1
         return requests
 
@@ -262,13 +295,18 @@ class QueryExecutor(HFLM):
     def create_argmax_inputs(self, queries):
         argmax_inputs = []
         for query in queries:
-            prompt_ids = self.tokenizer.encode(query.prompt, return_tensors='pt')
-            answer_start = prompt_ids.shape[-1]
             if isinstance(query.answers[0], str):
                 answer = query.answers[0]
             else:
                 answer = next(item for sublist in query.answers for item in sublist)
-            answer_tokens = self.tokenizer.encode(" " + answer, return_tensors='pt')
+            if self.use_chat_template:
+                prompt, answer = self.apply_chat_to_prompt_and_model_answer(query.prompt, answer)
+            else:
+                prompt = query.prompt
+                answer = " " + answer
+            prompt_ids = self.tokenizer.encode(prompt, return_tensors='pt')
+            answer_start = prompt_ids.shape[-1]
+            answer_tokens = self.tokenizer.encode(answer, return_tensors='pt')
             answer_length = answer_tokens.shape[-1]
             inputs = torch.cat((prompt_ids, answer_tokens), dim=-1)
             argmax_inputs.append((inputs, answer_start, answer_length, answer_tokens))

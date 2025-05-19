@@ -19,13 +19,15 @@ class InContextModel(EditModel):
         model_name: str,
         tokenizer: Union[PreTrainedTokenizer, PreTrainedTokenizerFast],
         batch_size: Optional[int]=16,
+        use_chat_template: bool=False,
     ):
         QueryExecutor.__init__(
             self,
             model=model,
             model_name=model_name,
             tokenizer=tokenizer,
-            batch_size=batch_size
+            batch_size=batch_size,
+            use_chat_template=use_chat_template,
         )
         self.edit_context = ""
         self.edit_facts = []

@@ -40,7 +40,23 @@ class ExampleResult:
 
 
 class Evaluator:
-    def __init__(self, model_name, editor_name, control_task_dict, control_task_data, control_data_boundaries, dataset, dataset_sample_size=None, edit_batch_size=1, sequential_editing=False, evaluate_generate_lengths=False, eval_batch_size=8, random_seed=42, save_path=None, device="cuda"):
+    def __init__(
+            self,
+            model_name,
+            editor_name,
+            control_task_dict,
+            control_task_data,
+            control_data_boundaries,
+            dataset, dataset_sample_size=None,
+            edit_batch_size=1,
+            sequential_editing=False,
+            evaluate_generate_lengths=False,
+            use_chat_template=False,
+            eval_batch_size=8,
+            random_seed=42,
+            save_path=None,
+            device="cuda",
+            ):
         self.model_name = model_name
         self.device=device
         self.editor_name = editor_name
@@ -55,6 +71,7 @@ class Evaluator:
             self.dataset.sample(dataset_sample_size, self.random_seed)
         self.edit_batch_size = edit_batch_size
         self.evaluate_generate_lengths = evaluate_generate_lengths
+        self.use_chat_template = use_chat_template
         self.save_path = save_path
         self.editing_results = []
         self.lm_results = []
@@ -99,13 +116,13 @@ class Evaluator:
         #if editor_name == 'rome':
         #    self.model_editor = ROMEModelEditor(query_executor)
         if self.editor_name == 'no-edit':
-            self.lm = NoEditModel(model, model_name, tokenizer, batch_size=self.eval_batch_size)
+            self.lm = NoEditModel(model, model_name, tokenizer, batch_size=self.eval_batch_size, use_chat_template=self.use_chat_template)
         elif self.editor_name == 'memit':
-            self.lm = MEMITModel(model, model_name, tokenizer, batch_size=self.eval_batch_size)
+            self.lm = MEMITModel(model, model_name, tokenizer, batch_size=self.eval_batch_size, use_chat_template=self.use_chat_template)
         elif self.editor_name == 'in-context':
-            self.lm = InContextModel(model, model_name, tokenizer, batch_size=self.eval_batch_size)
+            self.lm = InContextModel(model, model_name, tokenizer, batch_size=self.eval_batch_size, use_chat_template=self.use_chat_template)
         elif self.editor_name == 'context-retriever':
-            self.lm = ContextRetrieverModel(model, model_name, tokenizer, batch_size=self.eval_batch_size)
+            self.lm = ContextRetrieverModel(model, model_name, tokenizer, batch_size=self.eval_batch_size, use_chat_template=self.use_chat_template)
         else:
             raise ValueError(f"{editor_name} is not a supported model editor")
     

@@ -45,6 +45,7 @@ def evaluate(args):
         sample_size = args.sample_size,
         evaluate_generate_lengths = args.evaluate_generate_lengths,
         force_query_type = args.force_query_type,
+        use_chat_template = args.use_chat_template,
         dataset_base_path = args.dataset_base_path,
         save_path = args.results_dir,
         device=args.device
@@ -78,9 +79,10 @@ def main():
     eval_parser.add_argument("--editing_tasks", nargs="+", type=str, default=["zsRE", "CounterFact", "MQuAKE", "RippleEdits"], help="Editing tasks (list or single task)")
     eval_parser.add_argument("--control_tasks", nargs="+", type=str, default=["lambada", "hellaswag"], help="LM Eval control tasks (list, single task or 'none')")
     eval_parser.add_argument("--evaluate_generate_lengths", type=bool, default=False, help="Evaluate multiple generate lengths")
-    eval_parser.add_argument("--results_dir", type=str, default=None)
+    eval_parser.add_argument("--results_dir", type=str, default="results/")
     eval_parser.add_argument("--device", type=str, default="cuda")
     eval_parser.add_argument("--config", type=str, default="config/default_config.yaml", help="Path to config file")
+    eval_parser.add_argument("--use_chat_template", type=bool, default=False, help="Model is instruction tuned; use chat template for queries")
 
     analyze_parser = subparsers.add_parser("analyze", help="Analyze results")
     analyze_parser.add_argument("--results_dir", type=str, default="results/", help="Directory of evaluation result files")

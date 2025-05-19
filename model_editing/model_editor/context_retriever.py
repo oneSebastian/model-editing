@@ -21,18 +21,22 @@ class ContextRetrieverModel(EditModel):
         model_name: str,
         tokenizer: Union[PreTrainedTokenizer, PreTrainedTokenizerFast],
         batch_size: Optional[int]=16,
+        use_chat_template: bool=False,
     ):
         QueryExecutor.__init__(
             self,
             model=model,
             model_name=model_name,
             tokenizer=tokenizer,
-            batch_size=batch_size
+            batch_size=batch_size,
+            use_chat_template=use_chat_template,
         )
         self.embedding_model = AutoModel.from_pretrained("facebook/contriever-msmarco").to(self._device)
         self.embedding_tokenizer = AutoTokenizer.from_pretrained("facebook/contriever-msmarco")
         self.edit_facts = []
         self.fact_embeddings = None
+        self.instruction = "Imagine that "
+        self.instruction_tokens = self.tokenizer.encode(self.instruction, return_tensors='pt')
 
     def mean_pooling(self, token_embeddings, mask):
         token_embeddings = token_embeddings.masked_fill(~mask[..., None].bool(), 0.)
@@ -75,7 +79,7 @@ class ContextRetrieverModel(EditModel):
         fact_ids = self.retrieve_facts(prompt)
         context_facts = [self.edit_facts[i] for i in fact_ids]
         context_fact_sentences = [f"{fact.prompt} {fact.target}." for fact in context_facts]
-        prompt_context = "Imagine that " + " ".join(context_fact_sentences) + "\n"
+        prompt_context = self.instruction + " ".join(context_fact_sentences) + "\n"
         return prompt_context
 
     def restore_model(self):
@@ -96,7 +100,16 @@ class ContextRetrieverModel(EditModel):
                 edit_context = ""
             elif edit_tokens.shape[-1] > max_edit_context:
                 edit_context = self.tokenizer.decode(edit_tokens[0][:max_edit_context])
-            request.arguments = (edit_context + request.arguments[0],) + request.arguments[1:]
+            if self.use_chat_template:
+                conversation = [{"role": "user", "content": edit_context + request.arguments[0]}]
+                prompt = self.tokenizer.apply_chat_template(
+                    conversation,
+                    tokenize=False,
+                    add_generation_prompt=True,
+                )
+            else:
+                prompt = edit_context + request.arguments[0]
+            request.arguments = (prompt,) + request.arguments[1:]
             
     def _edit_loglikelihood_requests(self, requests):
         if not self.edit_facts:
@@ -113,7 +126,12 @@ class ContextRetrieverModel(EditModel):
                         edit_context = ""
                     elif edit_tokens.shape[-1] > max_edit_context:
                         edit_context = self.tokenizer.decode(edit_tokens[0][:max_edit_context])
-                    request.arguments = (edit_context + request.arguments[0],) + request.arguments[1:]
+                    if self.use_chat_template:
+                        prompt, response = self.apply_chat_to_prompt_and_model_answer(edit_context + request.arguments[0], request.arguments[1])
+                    else:
+                        prompt = edit_context + request.arguments[0]
+                        response = request.arguments[1]
+                    request.arguments = (prompt, response) + request.arguments[2:]
                 else:
                     for i, arg in enumerate(request.arguments):
                         print(i, arg)
@@ -130,7 +148,11 @@ class ContextRetrieverModel(EditModel):
                     edit_context = ""
                 elif edit_tokens.shape[-1] > max_edit_context:
                     edit_context = self.tokenizer.decode(edit_tokens[0][:max_edit_context])
-                request.arguments = edit_context + argument if isinstance(request.arguments, str) else (edit_context + argument,)
+                if self.use_chat_template:
+                    prompt = self.apply_chat_to_single_prompt(edit_context + argument)
+                else:
+                    prompt = edit_context + argument
+                request.arguments = prompt if isinstance(request.arguments, str) else (prompt,)
 
     def generate_until(
         self, requests, disable_tqdm: bool = False
@@ -169,10 +191,14 @@ class ContextRetrieverModel(EditModel):
                 edit_context = ""
             elif edit_tokens.shape[-1] > max_edit_context:
                 edit_context = self.tokenizer.decode(edit_tokens[0][:max_edit_context])
+            if self.use_chat_template:
+                arguments = self.apply_chat_to_prompt_and_model_answer(edit_context, request.arguments[0])
+            else:
+                arguments = (edit_context, request.arguments[0])
             contextualised_requests.append(Instance(
                 request_type="loglikelihood",
                 doc=request.doc,
-                arguments=(edit_context, request.arguments[0]),
+                arguments=arguments,
                 idx=request.idx,
             ))
         contextualised_results = HFLM.loglikelihood(self, contextualised_requests, disable_tqdm)
@@ -182,23 +208,45 @@ class ContextRetrieverModel(EditModel):
         argmax_inputs = []
         context_window = self.model.config.max_position_embeddings
         for query in queries:
-            # To have effective edits: self.edit_context + query.prompt instead of just query.prompt
             edit_context = self.get_prompt_context(query.prompt)
-            edit_ids = self.tokenizer.encode(edit_context[:-1], return_tensors='pt') if self.edit_facts else None
-            prompt_ids = self.tokenizer.encode((edit_context[-1] if self.edit_facts else "") + query.prompt, return_tensors='pt')
             if isinstance(query.answers[0], str):
                 answer = query.answers[0]
             else:
                 answer = next(item for sublist in query.answers for item in sublist)
-            answer_tokens = self.tokenizer.encode(" " + answer, return_tensors='pt')
+            if self.use_chat_template:
+                prompt, answer = self.apply_chat_to_prompt_and_model_answer((edit_context if self.edit_facts else "") + query.prompt, answer)
+            else:
+                prompt = (edit_context if self.edit_facts else "") + query.prompt
+                answer = " " + answer
+            
+            prompt_ids = self.tokenizer.encode(prompt, return_tensors='pt')
+            answer_tokens = self.tokenizer.encode(answer, return_tensors='pt')
             answer_length = answer_tokens.shape[-1]
 
-            fill_context = max(0, context_window - prompt_ids.shape[-1] - answer_length)
-            if self.edit_facts and fill_context < edit_ids.shape[-1]:
-                edit_ids = edit_ids[:, :fill_context]
-            prompt_length = edit_ids.shape[-1] + prompt_ids.shape[-1] if self.edit_facts else prompt_ids.shape[-1]
-
-            inputs = torch.cat((edit_ids, prompt_ids, answer_tokens), dim=-1) if self.edit_facts else torch.cat((prompt_ids, answer_tokens), dim=-1)
+            prompt_space = max(0, context_window - self.instruction_tokens.shape[-1] - answer_length)
+            if self.edit_facts and prompt_space < prompt_ids.shape[-1]:
+                prompt_ids = torch.cat((self.instruction_tokens, prompt_ids[:, prompt_space:], answer_tokens), dim=-1)
+            prompt_length = prompt_ids.shape[-1]
+            inputs = torch.cat((prompt_ids, answer_tokens), dim=-1)
             assert inputs.shape[-1] <= context_window
             argmax_inputs.append((inputs, prompt_length, answer_length, answer_tokens))
+            '''
+            else:
+                # To have effective edits: self.edit_context + query.prompt instead of just query.prompt
+                edit_context = self.get_prompt_context(query.prompt)
+                edit_ids = self.tokenizer.encode(edit_context[:-1], return_tensors='pt') if self.edit_facts else None
+                prompt_ids = self.tokenizer.encode((edit_context[-1] if self.edit_facts else "") + query.prompt, return_tensors='pt')
+                
+                answer_tokens = self.tokenizer.encode(" " + answer, return_tensors='pt')
+                answer_length = answer_tokens.shape[-1]
+
+                fill_context = max(0, context_window - prompt_ids.shape[-1] - answer_length)
+                if self.edit_facts and fill_context < edit_ids.shape[-1]:
+                    edit_ids = edit_ids[:, :fill_context]
+                prompt_length = edit_ids.shape[-1] + prompt_ids.shape[-1] if self.edit_facts else prompt_ids.shape[-1]
+
+                inputs = torch.cat((edit_ids, prompt_ids, answer_tokens), dim=-1) if self.edit_facts else torch.cat((prompt_ids, answer_tokens), dim=-1)
+                assert inputs.shape[-1] <= context_window
+                argmax_inputs.append((inputs, prompt_length, answer_length, answer_tokens))
+            '''
         return argmax_inputs

@@ -4,7 +4,7 @@ from pathlib import Path
 import torch
 from datasets import load_dataset
 from tqdm.auto import tqdm
-from transformers import AutoModelForCausalLM, AutoTokenizer, GPTNeoXForCausalLM, LlamaForCausalLM
+from transformers import AutoModelForCausalLM, AutoTokenizer, GPTNeoXForCausalLM, LlamaForCausalLM, MistralForCausalLM
 
 from ..util.globals import *
 from ..util.nethook import Trace, set_requires_grad
@@ -98,7 +98,7 @@ def layer_stats(
             ds_name,
             dict(wikitext="wikitext-103-raw-v1", wikipedia="20220301.en")[ds_name],
         )
-        if isinstance(model, LlamaForCausalLM) or isinstance(model, GPTNeoXForCausalLM):
+        if isinstance(model, LlamaForCausalLM) or isinstance(model, GPTNeoXForCausalLM) or isinstance(model, MistralForCausalLM):
             maxlen = model.config.max_position_embeddings
         else:
             maxlen = model.config.n_positions
@@ -108,7 +108,7 @@ def layer_stats(
 
     # Continue with computation of statistics
     batch_size = 100  # Examine this many dataset texts at once
-    if isinstance(model, LlamaForCausalLM) or isinstance(model, GPTNeoXForCausalLM):
+    if isinstance(model, LlamaForCausalLM) or isinstance(model, GPTNeoXForCausalLM) or isinstance(model, MistralForCausalLM):
         npos = model.config.max_position_embeddings
     else:
         npos = model.config.n_positions
