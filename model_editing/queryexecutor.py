@@ -27,7 +27,9 @@ class QueryExecutor(HFLM):
             transformers.PreTrainedTokenizer,
             transformers.PreTrainedTokenizerFast,
         ],
+        verbose: bool = False, # print results of queries for debugging
         use_chat_template: bool = False, # SEB: add option to use simple chat template for all queries
+        editor_applies_chat_template: bool = False, # Seb: for in context editors chat template doesnt need to be applied by base class
         backend: Literal["default", "causal", "seq2seq"] = "causal",
         revision: Optional[str] = "main",
         subfolder: Optional[str] = None,
@@ -58,6 +60,9 @@ class QueryExecutor(HFLM):
 
         self.argmax_batch_size = batch_size
         self.use_chat_template = use_chat_template
+        self.editor_applies_chat_template = editor_applies_chat_template
+        # TODO: use more systematic way to define verbosity
+        self.verbose = verbose
 
         # determine which of 'causal' and 'seq2seq' backends to use for HF models
         self._get_backend(
@@ -140,6 +145,9 @@ class QueryExecutor(HFLM):
         prompt_only_messages = chat_messages[:-1]
         full_prompt = self.tokenizer.apply_chat_template(prompt_only_messages, tokenize=False, add_generation_prompt=True)
         continuation = self.tokenizer.apply_chat_template(chat_messages, tokenize=False)[len(full_prompt):]
+        # TODO: Should I mirror the behavior following behavior?: https://github.com/EleutherAI/lm-evaluation-harness/blob/8bc4afff22e73995883de41018388428e39f8a92/docs/chat-template-readme.md
+        #if continuation.startswith(" "):
+        #    continuation = continuation[1:]
         return full_prompt, continuation
     
 
@@ -186,6 +194,7 @@ class QueryExecutor(HFLM):
                 idx=i,
             ) for i in range(len(queries))
         ]
+
 
     @staticmethod
     def _verify_generate_queries(queries, generated):
@@ -241,7 +250,10 @@ class QueryExecutor(HFLM):
             requests = self._create_generate_until_requests(queries)
             # print("DEBUG self._max_gen_toks, execute_generate_queries:", self._max_gen_toks)
             generated = self.generate_until(requests)
-            # print("DEBUG generated:", generated)
+            if self.verbose:
+                for i, request in enumerate(requests):
+                    print(f"arguments: {request.arguments}")
+                    print("generated:", generated[i])
             self._max_gen_toks = tmp_max_gen_toks
             results = self._verify_generate_queries(queries, generated)
             return results
@@ -254,29 +266,26 @@ class QueryExecutor(HFLM):
             for option in query.answer_options:
                 assert isinstance(option, str)
                 if self.use_chat_template:
-                    prompt, continuation = self.apply_chat_to_prompt_and_model_answer(query.prompt, option)
-                    requests.append(
-                        Instance(
-                            request_type="loglikelihood",
-                            doc=None,
-                            arguments=(prompt, continuation),
-                            idx=i,
-                        )
-                    )
+                    argument_prompt, argument_option = self.apply_chat_to_prompt_and_model_answer(query.prompt, option)
                 else:
-                    requests.append(
-                        Instance(
-                        request_type="loglikelihood",
-                        doc=None,
-                        arguments=(query.prompt, f" {option}"),
-                        idx=i,
-                    ))
+                    argument_prompt, argument_option = query.prompt, f" {option}"
+                requests.append(
+                    Instance(
+                    request_type="loglikelihood",
+                    doc=None,
+                    arguments=(argument_prompt, argument_option),
+                    idx=i,
+                ))
                 i += 1
         return requests
 
     def execute_options_queries(self, queries):
         requests = self._create_options_requests(queries)
         responses = self.loglikelihood(requests, disable_tqdm=False)
+        if self.verbose:
+            for i, request in enumerate(requests):
+                print("arguments:", request.arguments)
+                print("response:", responses[i])
         assert len(requests) == len(responses)
 
         # check query responses
@@ -293,20 +302,24 @@ class QueryExecutor(HFLM):
         return results
     
     def create_argmax_inputs(self, queries):
+        bos = self.tokenizer.bos_token_id
+        eos = self.tokenizer.eos_token_id
         argmax_inputs = []
         for query in queries:
             if isinstance(query.answers[0], str):
                 answer = query.answers[0]
             else:
                 answer = next(item for sublist in query.answers for item in sublist)
-            if self.use_chat_template:
+            if self.use_chat_template and not self.editor_applies_chat_template:
                 prompt, answer = self.apply_chat_to_prompt_and_model_answer(query.prompt, answer)
             else:
                 prompt = query.prompt
                 answer = " " + answer
-            prompt_ids = self.tokenizer.encode(prompt, return_tensors='pt')
+            prompt_ids = self.tokenizer.encode(prompt, return_tensors='pt', add_special_tokens=False)
             answer_start = prompt_ids.shape[-1]
-            answer_tokens = self.tokenizer.encode(answer, return_tensors='pt')
+            answer_tokens = self.tokenizer.encode(answer, return_tensors='pt', add_special_tokens=False)
+            if answer_tokens[0][-1] == eos:
+                answer_tokens = answer_tokens[:,:-1]
             answer_length = answer_tokens.shape[-1]
             inputs = torch.cat((prompt_ids, answer_tokens), dim=-1)
             argmax_inputs.append((inputs, answer_start, answer_length, answer_tokens))
@@ -320,7 +333,7 @@ class QueryExecutor(HFLM):
             batch_inputs = argmax_inputs[i:min(i + self.argmax_batch_size, len(argmax_inputs))]
             # batch and pad input ids
             m = max(_[0].shape[1] for _ in batch_inputs)
-            pad_token = self.tokenizer.encode(self.tokenizer.pad_token)[0]
+            pad_token = self.tokenizer.pad_token_id
             padded_inputs = [
                 torch.cat([inputs[0], torch.full((1, m - inputs[0].shape[1]), pad_token)], dim=1)
                 for inputs in batch_inputs
@@ -338,7 +351,11 @@ class QueryExecutor(HFLM):
                     _, answer_start, answer_length, answer_tokens = inputs
                     query_results = []
                     for k in range(answer_tokens.shape[1]):
+                        if answer_tokens[0][k] == self.tokenizer.eos_token_id: # stop when we hit an eos token
+                            break
                         query_results.append((max_tokens[j][answer_start - 1 + k] == answer_tokens[0][k]).item())
+                        #if self.verbose:
+                        #    print(f"{self.tokenizer.decode([max_tokens[j][answer_start - 1 + k]])}, {self.tokenizer.decode([answer_tokens[0][k]])}, {query_results[-1]}")
                     results.append(query_results)
             del outputs, logits, max_tokens  # free memory
             torch.cuda.empty_cache()
@@ -354,6 +371,11 @@ class QueryExecutor(HFLM):
                     query_results.append((max_tokens[j][answer_start - 1 + k] == answer_tokens[0][k]).item())
                 results.append(query_results)
             '''
+        input_tokens_list = [_[0] for _ in argmax_inputs]
+        if self.verbose:
+            for i, input_tokens in enumerate(input_tokens_list):
+                print("inputs:", self.tokenizer.decode(input_tokens[0]))
+                print("result:", results[i])
         return results
     
     # The base QueryExecutor overwrites loglikelihood_rolling, because in context editors use loglikelihood method instead to compute loglikelihood of request sequence conditional on edit sequence

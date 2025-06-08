@@ -22,6 +22,8 @@ class ContextRetrieverModel(EditModel):
         tokenizer: Union[PreTrainedTokenizer, PreTrainedTokenizerFast],
         batch_size: Optional[int]=16,
         use_chat_template: bool=False,
+        edit_template: Union[bool, str]=1,
+        verbose: bool=False,
     ):
         QueryExecutor.__init__(
             self,
@@ -30,13 +32,19 @@ class ContextRetrieverModel(EditModel):
             tokenizer=tokenizer,
             batch_size=batch_size,
             use_chat_template=use_chat_template,
+            editor_applies_chat_template=use_chat_template,
+            verbose=verbose,
         )
         self.embedding_model = AutoModel.from_pretrained("facebook/contriever-msmarco").to(self._device)
         self.embedding_tokenizer = AutoTokenizer.from_pretrained("facebook/contriever-msmarco")
         self.edit_facts = []
         self.fact_embeddings = None
-        self.instruction = "Imagine that "
-        self.instruction_tokens = self.tokenizer.encode(self.instruction, return_tensors='pt')
+        self.edit_template = edit_template
+
+        self.chat_template_beginning = "<s>[INST]"
+        if self.use_chat_template and self._model_name != "mistral_7B_instruct":
+            # TODO: generalise implementation
+            raise NotImplementedError("In context editing with chat template is currently only implemented for Mistral-7B-Instruct-v0.3. We have a hard coded assumption that the first user quers starts with \"<s>[INST]\"")
 
     def mean_pooling(self, token_embeddings, mask):
         token_embeddings = token_embeddings.masked_fill(~mask[..., None].bool(), 0.)
@@ -72,23 +80,40 @@ class ContextRetrieverModel(EditModel):
             self.fact_embeddings = torch.cat((self.fact_embeddings, embs), dim=0)
         else:
             self.fact_embeddings = embs
-    
+
+    def get_edit_context(self, fact_sentences):
+        if self.edit_template == 0:
+            return "Imagine that " + " ".join(fact_sentences) + "\n"
+        elif self.edit_template == 1:
+            instruction = "### Instruction\n\nYour internal knowledge is out of date. The following facts are true. " \
+            "Disregard any conflicting knowledge that you might have regarding the named entities. Do not print out any inaccuracies in the provided fact. " \
+            "Only complete the request that is provided.\n\n### Updated Facts\n\n"
+            facts = "\n".join(["- " + fact_sentence for fact_sentence in fact_sentences])
+            pre_prompt = "\n### Request to answer\n\n"
+            return instruction + facts + pre_prompt
+        elif self.edit_template == "test_empty":
+            return ""
+        else:
+            raise ValueError(f"{template} is not a recognised edit context template id.")
+
     def get_prompt_context(self, prompt):
         if self.fact_embeddings is None:
             return ""
         fact_ids = self.retrieve_facts(prompt)
         context_facts = [self.edit_facts[i] for i in fact_ids]
         context_fact_sentences = [f"{fact.prompt} {fact.target}." for fact in context_facts]
-        prompt_context = self.instruction + " ".join(context_fact_sentences) + "\n"
-        return prompt_context
+        return self.get_edit_context(context_fact_sentences)
+        #prompt_context = self.instruction + " ".join(context_fact_sentences) + "\n"
+        #return prompt_context
 
     def restore_model(self):
         self.edit_facts = []
         self.fact_embeddings = None
-    
+
     def _edit_generate_until_requests(self, requests):
-        if not self.edit_facts:
-            return requests
+        # We may still need to apply the chat template and cannot return immediately
+        #if not self.edit_facts:
+        #    return requests
         context_window = self.model.config.max_position_embeddings
         for request in requests:
             assert len(request.arguments) == 2 and isinstance(request.arguments[1], dict)
@@ -101,19 +126,16 @@ class ContextRetrieverModel(EditModel):
             elif edit_tokens.shape[-1] > max_edit_context:
                 edit_context = self.tokenizer.decode(edit_tokens[0][:max_edit_context])
             if self.use_chat_template:
-                conversation = [{"role": "user", "content": edit_context + request.arguments[0]}]
-                prompt = self.tokenizer.apply_chat_template(
-                    conversation,
-                    tokenize=False,
-                    add_generation_prompt=True,
-                )
+                assert request.arguments[0].startswith(self.chat_template_beginning), "For now we are assuming we're working with Mistral-7B-Instruvt-v0.3"
+                prompt = self.chat_template_beginning + edit_context + request.arguments[0][len(self.chat_template_beginning):]
             else:
                 prompt = edit_context + request.arguments[0]
             request.arguments = (prompt,) + request.arguments[1:]
             
     def _edit_loglikelihood_requests(self, requests):
-        if not self.edit_facts:
-            return requests
+        # We may still need to apply the chat template and cannot return immediately
+        #if not self.edit_facts:
+        #    return requests
         context_window = self.model.config.max_position_embeddings
         for request in requests:
             if isinstance(request.arguments, tuple) and len(request.arguments) > 1:
@@ -127,7 +149,10 @@ class ContextRetrieverModel(EditModel):
                     elif edit_tokens.shape[-1] > max_edit_context:
                         edit_context = self.tokenizer.decode(edit_tokens[0][:max_edit_context])
                     if self.use_chat_template:
-                        prompt, response = self.apply_chat_to_prompt_and_model_answer(edit_context + request.arguments[0], request.arguments[1])
+                        #prompt, response = self.apply_chat_to_prompt_and_model_answer(edit_context + request.arguments[0], request.arguments[1])
+                        assert request.arguments[0].startswith(self.chat_template_beginning), f"For now we are assuming we're working with Mistral-7B-Instruvt-v0.3, request.arguments[0]={request.arguments[0]}"
+                        prompt = self.chat_template_beginning + edit_context + request.arguments[0][len(self.chat_template_beginning):]
+                        response = request.arguments[1]
                     else:
                         prompt = edit_context + request.arguments[0]
                         response = request.arguments[1]
@@ -192,7 +217,13 @@ class ContextRetrieverModel(EditModel):
             elif edit_tokens.shape[-1] > max_edit_context:
                 edit_context = self.tokenizer.decode(edit_tokens[0][:max_edit_context])
             if self.use_chat_template:
-                arguments = self.apply_chat_to_prompt_and_model_answer(edit_context, request.arguments[0])
+                #arguments = self.apply_chat_to_prompt_and_model_answer(edit_context, request.arguments[0])
+                #response = request.arguments[1]
+                assert request.arguments[0].startswith(self.chat_template_beginning), "For now we are assuming we're working with Mistral-7B-Instruvt-v0.3"
+                arguments = (
+                    self.chat_template_beginning + edit_context,
+                    request.arguments[0][len(self.chat_template_beginning):]
+                )
             else:
                 arguments = (edit_context, request.arguments[0])
             contextualised_requests.append(Instance(
@@ -219,13 +250,13 @@ class ContextRetrieverModel(EditModel):
                 prompt = (edit_context if self.edit_facts else "") + query.prompt
                 answer = " " + answer
             
-            prompt_ids = self.tokenizer.encode(prompt, return_tensors='pt')
-            answer_tokens = self.tokenizer.encode(answer, return_tensors='pt')
+            prompt_ids = self.tokenizer.encode(prompt, return_tensors='pt', add_special_tokens=False)
+            answer_tokens = self.tokenizer.encode(answer, return_tensors='pt', add_special_tokens=False)
             answer_length = answer_tokens.shape[-1]
 
-            prompt_space = max(0, context_window - self.instruction_tokens.shape[-1] - answer_length)
+            prompt_space = max(0, context_window - answer_length)
             if self.edit_facts and prompt_space < prompt_ids.shape[-1]:
-                prompt_ids = torch.cat((self.instruction_tokens, prompt_ids[:, prompt_space:], answer_tokens), dim=-1)
+                prompt_ids = prompt_ids[:, :prompt_space]
             prompt_length = prompt_ids.shape[-1]
             inputs = torch.cat((prompt_ids, answer_tokens), dim=-1)
             assert inputs.shape[-1] <= context_window

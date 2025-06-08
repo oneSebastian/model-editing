@@ -84,10 +84,12 @@ def compute_z(
     # rewrite layer, i.e. hypothesized fact lookup location, will induce the
     # target token to be predicted at the final layer.
     #delta = torch.zeros((model.config.n_embd,), requires_grad=True, device="cuda")
-    if isinstance(model, LlamaForCausalLM) or isinstance(model, GPTNeoXForCausalLM) or isinstance(model, Qwen2ForCausalLM) or isinstance(model, MistralForCausalLM):
+    if hasattr(model.config, "n_embd"):
+        delta = torch.zeros((model.config.n_embd,), requires_grad=True, device=calc_device)
+    elif hasattr(model.config, "hidden_size"):
         delta = torch.zeros((model.config.hidden_size,), requires_grad=True, device=calc_device)
     else:
-        delta = torch.zeros((model.config.n_embd,), requires_grad=True, device=calc_device)
+        raise NotImplementedError
     target_init, kl_distr_init = None, None
 
     # Inserts new "delta" variable at the appropriate part of the computation

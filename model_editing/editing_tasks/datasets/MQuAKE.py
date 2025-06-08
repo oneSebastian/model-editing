@@ -7,6 +7,7 @@ from ..util import Dataset, Example, Fact, Query, TestCase, TestCondition, Query
 class MQuAKEDataset(Dataset):
     def __init__(self, dataset_name: str, examples: list):
         super().__init__(dataset_name, examples)
+
     
     @staticmethod
     def parse_example(split: str, data_dict: dict, force_query_type):
@@ -24,7 +25,9 @@ class MQuAKEDataset(Dataset):
                 target = fact_data["target_new"]["str"],
                 original_target = fact_data["target_true"]["str"],
                 fact_query = Query(
-                    prompt = fact_data["prompt"].replace("{}", fact_data["subject"]),
+                    #prompt = fact_data["prompt"].replace("{}", fact_data["subject"]),
+                    # seb, since test cases use question answer format I will do the same for fact queries
+                    prompt=fact_data["question"],
                     answers = fact_query_answers,
                     query_type=QueryType.GEN if force_query_type is None else force_query_type,
                 ),
@@ -39,12 +42,11 @@ class MQuAKEDataset(Dataset):
             ))
 
         test_case = TestCase(
-                test_dimension = "default",
+                test_dimension = f"{len(data_dict["new_single_hops"])}-hop",
                 test_condition = TestCondition.OR,
                 test_queries = test_queries,
                 condition_queries = [],
         )
-
         return Example(
             example_id=data_dict["case_id"],
             example_type="default",
@@ -60,7 +62,7 @@ class MQuAKEDataset(Dataset):
             split = "CF-3k-v2"
         else:
             dataset_name = "MQuAKE_" + split
-        with open(f"{data_directory}MQuAKE-{split}.json", 'r') as f:
+        with open(f"{data_directory}/MQuAKE-{split}.json", 'r') as f:
             examples = json.load(f)
         example_list = []
         for i, example_data in tqdm(enumerate(examples), desc=f"Reading data from file: {data_directory}MQuAKE-{split}.json"):

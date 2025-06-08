@@ -1,3 +1,4 @@
+import sys
 import argparse
 import yaml
 from model_editing.benchmark import benchmark_knowledge_editing
@@ -55,11 +56,15 @@ def evaluate(args):
 def analyze(args):
     result = EvalResult()
     result.load_editing_data(args.results_dir)
-    result.aggregate_editing_data(groupby_dimensions=args.groupby_dimension, groupby_dataset_splits=args.groupby_dataset_splits, exclude_fact_queries=args.exclude_fact_queries, evaluate_generate_lengths=args.evaluate_generate_lengths)
+    result.aggregate_editing_data(groupby_dimensions=args.groupby_dimension, groupby_dataset_splits=args.groupby_dataset_splits, exclude_fact_queries=not args.include_fact_queries, evaluate_generate_lengths=args.evaluate_generate_lengths)
     if not args.evaluate_generate_lengths:
         print(result.aggregated_editing_data.to_string())
+        if args.to_csv:
+            result.aggregated_editing_data[["accuracy"]].round(3).to_csv(sys.stdout, index=True)
         result.load_aggregated_control_data(args.results_dir)
         print(result.aggregated_control_data.to_string())
+        if args.to_csv:
+            result.aggregated_control_data[["model", "editor", "task", "metric", "n-samples", "higher_is_better", "score"]].round(3).to_csv(sys.stdout, index=False)
     else:
         raise NotImplementedError("Analysis of generate lengths not refactored yet")
 
@@ -70,7 +75,7 @@ def main():
 
     eval_parser = subparsers.add_parser("evaluate", help="Run evaluation")
     eval_parser.set_defaults(func=evaluate)
-    eval_parser.add_argument("--models", type=str, required=True, help="Model names (list or single model name)")
+    eval_parser.add_argument("--models", nargs="+", type=str, required=True, help="Model names (list or single model name)")
     eval_parser.add_argument("--editors", nargs="+", type=str, required=True, help="Editor name (list or single editor)")
     eval_parser.add_argument("--edit_batch_size", type=int, required=True, help="Number of examples per edit batch")
     eval_parser.add_argument("--eval_batch_size", type=int, default=16, help="Evaluation batch size")
@@ -78,18 +83,19 @@ def main():
     eval_parser.add_argument("--force_query_type", type=parse_query_type, default=None, help="Forced query type for the dataset (arg, gen or mc)")
     eval_parser.add_argument("--editing_tasks", nargs="+", type=str, default=["zsRE", "CounterFact", "MQuAKE", "RippleEdits"], help="Editing tasks (list or single task)")
     eval_parser.add_argument("--control_tasks", nargs="+", type=str, default=["lambada", "hellaswag"], help="LM Eval control tasks (list, single task or 'none')")
-    eval_parser.add_argument("--evaluate_generate_lengths", type=bool, default=False, help="Add flag to evaluate multiple generate lengths")
+    eval_parser.add_argument("--evaluate_generate_lengths", action="store_true", help="Add flag to evaluate multiple generate lengths")
     eval_parser.add_argument("--results_dir", type=str, default="results/")
     eval_parser.add_argument("--device", type=str, default="cuda")
     eval_parser.add_argument("--config", type=str, default="config/default_config.yaml", help="Path to config file")
-    eval_parser.add_argument("--use_chat_template", type=bool, default=False, help="Add flag to signidfy that model is instruction tuned; use chat template for queries")
+    eval_parser.add_argument("--use_chat_template", action="store_true", help="Add flag to signify that model is instruction tuned; use chat template for queries")
 
     analyze_parser = subparsers.add_parser("analyze", help="Analyze results")
     analyze_parser.add_argument("--results_dir", type=str, default="results/", help="Directory of evaluation result files")
-    analyze_parser.add_argument("--groupby_dimension", type=bool, default=False, help="Add flag to group results by dataset dimension")
-    analyze_parser.add_argument("--groupby_dataset_splits", type=bool, default=False, help="Add flag to group results by dataset splits")
-    analyze_parser.add_argument("--exclude_fact_queries", type=bool, default=True, help="Add flag to exclude fact queries from analysis")
-    analyze_parser.add_argument("--evaluate_generate_lengths", type=bool, default=False, help="Add flag to evaluate multiple generate lengths")
+    analyze_parser.add_argument("--groupby_dimension", action="store_true", help="Add flag to group results by dataset dimension")
+    analyze_parser.add_argument("--groupby_dataset_splits", action="store_true", help="Add flag to group results by dataset splits")
+    analyze_parser.add_argument("--include_fact_queries", action="store_true", help="Add flag to include fact queries in analysis")
+    analyze_parser.add_argument("--evaluate_generate_lengths", action="store_true", help="Add flag to evaluate multiple generate lengths")
+    analyze_parser.add_argument("--to_csv", action="store_true", help="Add flag to write results table to csv")
     analyze_parser.set_defaults(func=analyze)
 
     # add arguments from config file

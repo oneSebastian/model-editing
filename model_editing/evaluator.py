@@ -9,7 +9,7 @@ import numpy as np
 from collections import defaultdict
 from lm_eval import evaluate
 from .models import load_model
-from .model_editor import NoEditModel, InContextModel, MEMITModel, ContextRetrieverModel
+from .model_editor import NoEditModel, InContextModel, MEMITModel, ContextRetrieverModel, LORAModel
 from .editing_tasks.util import TestCondition, QueryType
 from copy import deepcopy
 
@@ -56,6 +56,7 @@ class Evaluator:
             random_seed=42,
             save_path=None,
             device="cuda",
+            verbose=False,
             ):
         self.model_name = model_name
         self.device=device
@@ -76,6 +77,7 @@ class Evaluator:
         self.editing_results = []
         self.lm_results = []
         self.num_batches = math.ceil(len(self.dataset.examples) / edit_batch_size)
+        self.verbose=verbose
 
         if self.evaluate_generate_lengths and self.save_path is None:
             raise ValueError("evaluate_generate_length requires a save_path to write outputs to.")
@@ -116,17 +118,20 @@ class Evaluator:
         #if editor_name == 'rome':
         #    self.model_editor = ROMEModelEditor(query_executor)
         if self.editor_name == 'no-edit':
-            self.lm = NoEditModel(model, model_name, tokenizer, batch_size=self.eval_batch_size, use_chat_template=self.use_chat_template)
+            self.lm = NoEditModel(model, model_name, tokenizer, batch_size=self.eval_batch_size, use_chat_template=self.use_chat_template, verbose=self.verbose)
         elif self.editor_name == 'memit':
-            self.lm = MEMITModel(model, model_name, tokenizer, batch_size=self.eval_batch_size, use_chat_template=self.use_chat_template)
+            self.lm = MEMITModel(model, model_name, tokenizer, batch_size=self.eval_batch_size, use_chat_template=self.use_chat_template, verbose=self.verbose)
         elif self.editor_name == 'in-context':
-            self.lm = InContextModel(model, model_name, tokenizer, batch_size=self.eval_batch_size, use_chat_template=self.use_chat_template)
+            self.lm = InContextModel(model, model_name, tokenizer, batch_size=self.eval_batch_size, use_chat_template=self.use_chat_template, verbose=self.verbose)
         elif self.editor_name == 'context-retriever':
-            self.lm = ContextRetrieverModel(model, model_name, tokenizer, batch_size=self.eval_batch_size, use_chat_template=self.use_chat_template)
+            self.lm = ContextRetrieverModel(model, model_name, tokenizer, batch_size=self.eval_batch_size, use_chat_template=self.use_chat_template, verbose=self.verbose)
+        elif self.editor_name == 'lora':
+            self.lm = LORAModel(model, model_name, tokenizer, batch_size=self.eval_batch_size, use_chat_template=self.use_chat_template, verbose=self.verbose)
         else:
             raise ValueError(f"{editor_name} is not a supported model editor")
     
     def _evaluate_examples(self, batch_id, examples):
+        print("DEBUG Verify test cases")
         # check condition queries to determine which test_cases are valid.
         verify_test_case_start_time = time.perf_counter()
         batch_results = []
@@ -158,10 +163,14 @@ class Evaluator:
                 if all(condition_results[(example_idx, test_case_idx)]):
                     example_result.dimension_results[test_case.test_dimension].valid_test_cases += 1
                     valid_test_cases.append(test_case)
+            if self.verbose:
+                print(f"DEBUG example {example_idx} has {len(valid_test_cases)}/{len(example.test_cases)} valid test cases")
             example.test_cases = valid_test_cases
         verify_test_case_time = time.perf_counter() - verify_test_case_start_time
-            
+        
+
         # Edit model
+        print("DEBUG Edit model")
         start_time = time.perf_counter()
         self.lm.edit_model([fact for _example in examples for fact in _example.facts])
         edit_time = time.perf_counter() - start_time
@@ -350,6 +359,7 @@ class Evaluator:
                     lm=self.lm,
                     task_dict=batch_task_dict,
                     bootstrap_iters=0,
+                    apply_chat_template=self.lm.use_chat_template,
                 )
                 duration = time.perf_counter() - start_time
 
@@ -387,10 +397,10 @@ class Evaluator:
         else:
             lm_batch_results = None
         print("DEBUG batch done")
+
         # Restore model
         # TODO: we don't support sequential editing at the moment
-        #if not self.sequential_editing:
-        #    self.lm.restore_model()
+        self.lm.restore_model()
 
         return batch_results, lm_batch_results
 

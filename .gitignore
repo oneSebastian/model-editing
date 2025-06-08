@@ -7,6 +7,8 @@ pytest.ini
 model_editing.egg-info/
 nohup*
 experiments.txt
+debug_*
+tmp.py
 
 # ignore all datasets other than RippleEdits
 data/datasets/*

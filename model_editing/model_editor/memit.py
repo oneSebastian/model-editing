@@ -20,6 +20,7 @@ class MEMITModel(EditModel):
         tokenizer: Union[PreTrainedTokenizer, PreTrainedTokenizerFast],
         batch_size: Optional[int]=16,
         use_chat_template: bool=False,
+        verbose: bool=False,
     ):
         QueryExecutor.__init__(
             self,
@@ -28,14 +29,16 @@ class MEMITModel(EditModel):
             tokenizer=tokenizer,
             batch_size=batch_size,
             use_chat_template=use_chat_template,
+            verbose=verbose,
         )
         self._changed_weights = None
     
-    @staticmethod
-    def _format_fact_for_rome(fact):
+    def _format_fact_for_rome(self, fact):
         subject = fact.subject
         target = fact.target
         prompt = fact.prompt.replace(subject, '{}').replace(" " + target, "")
+        if self.use_chat_template:
+            prompt, _ = self.apply_chat_to_prompt_and_model_answer(prompt, target)
         return {'prompt': prompt, 'subject': subject, 'target_new': {'str': target}}
 
     def edit_model(self, facts):

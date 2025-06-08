@@ -107,7 +107,7 @@ def layer_stats(
         return TokenizedDataset(raw_ds["train"], tokenizer, maxlen=maxlen)
 
     # Continue with computation of statistics
-    batch_size = 100  # Examine this many dataset texts at once
+    batch_size = 5 # originall 100, but cuda out of memory errors occured  # Examine this many dataset texts at once
     if isinstance(model, LlamaForCausalLM) or isinstance(model, GPTNeoXForCausalLM) or isinstance(model, MistralForCausalLM):
         npos = model.config.max_position_embeddings
     else:

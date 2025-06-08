@@ -52,7 +52,7 @@ class CounterFactDataset(Dataset):
 
     @staticmethod
     def from_file(data_directory, force_query_type: Optional[QueryType]=None, limit=0):
-        with open(f"{data_directory}counterfact.json", 'r') as f:
+        with open(f"{data_directory}/counterfact.json", 'r') as f:
             examples = json.load(f)
         example_list = []
         for i, example_data in tqdm(enumerate(examples), desc=f"Reading data from file: {data_directory}founterfact.json"):

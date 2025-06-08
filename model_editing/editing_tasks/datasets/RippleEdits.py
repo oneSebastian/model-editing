@@ -71,7 +71,7 @@ class RippleEditsDataset(Dataset):
         example_list = []
         example_id = 0
         for split in splits:
-            with open(f"{data_directory}extended_{split}.json", 'r', encoding='utf-8') as f:
+            with open(f"{data_directory}/extended_{split}.json", 'r', encoding='utf-8') as f:
                 examples = json.load(f)
             for i, example_data in tqdm(enumerate(examples), desc=f"Reading data from file: {data_directory}extended_{split}.json"):
                 example_id += 1
