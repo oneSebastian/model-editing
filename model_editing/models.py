@@ -34,8 +34,8 @@ def load_model(model_name, device="cuda"):
     elif model_name == "mistral_7B":
         tokenizer = AutoTokenizer.from_pretrained("mistralai/Mistral-7B-v0.3")
         tokenizer.pad_token = tokenizer.eos_token
-        #model = AutoModelForCausalLM.from_pretrained("mistralai/Mistral-7B-v0.3", device_map=None, pad_token_id=tokenizer.eos_token_id).to(device)
-        model = AutoModelForCausalLM.from_pretrained("mistralai/Mistral-7B-v0.3", device_map="auto", pad_token_id=tokenizer.eos_token_id)
+        model = AutoModelForCausalLM.from_pretrained("mistralai/Mistral-7B-v0.3", device_map=None, pad_token_id=tokenizer.eos_token_id).to(device)
+        #model = AutoModelForCausalLM.from_pretrained("mistralai/Mistral-7B-v0.3", device_map="auto", pad_token_id=tokenizer.eos_token_id)
     elif model_name == "mistral_7B_instruct":
         tokenizer = AutoTokenizer.from_pretrained("mistralai/Mistral-7B-Instruct-v0.3")
         tokenizer.pad_token = tokenizer.eos_token

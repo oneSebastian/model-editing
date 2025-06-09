@@ -27,6 +27,8 @@ def apply_lora_to_model(
     """
     weights_copy = {}
     if copy:
+        #TODO: lets not copy
+        raise ValueError("SEB: lets not copy anything while tracing cuda out of memory errors")
         model = deepcopy(model)
 
     edited_model = execute_lora(model, tok, requests, hparams, lora_device, keep_original_weight)
@@ -149,6 +151,9 @@ def execute_lora(
                 for i in range(len(txt)):
                     tokens["labels"][i][num_pad_toks[i]:num_pad_toks[i]+num_prompt_toks[i]] = mask_token
                 tokens["labels"][tokens["input_ids"] == tok.pad_token_id] = mask_token
+                #for k, v in tokens.items():
+                #    print(k, v)
+                #print("DEBUG LORA:", tok.decode(tokens["input_ids"][0]))
                 tokens = tokens.to(device)
                 pred = peft_model(**tokens)
                 loss = pred.loss

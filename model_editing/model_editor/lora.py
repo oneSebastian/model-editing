@@ -1,6 +1,7 @@
 import sys
 import os
 import torch
+import gc
 import inspect
 from typing import Dict, List, Literal, Optional, Tuple, Union
 from transformers import (
@@ -36,11 +37,12 @@ class LORAModel(EditModel):
         self._original_model = None
     
 
-    @staticmethod
-    def _format_fact(fact):
+    def _format_fact(self, fact):
         subject = fact.subject
         target = fact.target
         prompt = fact.prompt.replace(" " + target, "")
+        if self.use_chat_template:
+            prompt, _ = self.apply_chat_to_prompt_and_model_answer(prompt, target)
         return {'prompt': prompt, 'subject': subject, 'target_new': target}
 
 
@@ -79,8 +81,28 @@ class LORAModel(EditModel):
 
 
     def restore_model(self):
+        # Visual debugging
+        import objgraph
+        objgraph.show_backrefs([self._model], filename='model_refs.png')
+
+        # Break possible internal references
+        if hasattr(self._model, 'base_model'):
+            self._model.base_model = None
+
+        # Move model to CPU before deleting
+        try:
+            self._model.to('cpu')
+        except Exception:
+            pass  # not all models have .to()
+
+        # Final memory cleanup
         del self._model
+        if '_model' in self.__dict__:
+            del self.__dict__['_model']
+        gc.collect()
         torch.cuda.empty_cache()
+
+        # Load clean model
         self._model, _ = load_model(self._model_name, self._device)
     
     

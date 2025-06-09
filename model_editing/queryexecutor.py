@@ -174,15 +174,17 @@ class QueryExecutor(HFLM):
         #print("DEBUG generation_kwargs", generation_kwargs)
         if max_length:
             generation_kwargs["max_new_tokens"] = None
-        return self.model.generate(
-            input_ids=context,
-            max_length=max_length,
-            # eos_token_id=None, # set eos_token_id to None for forcing target number of generated tokens
-            stopping_criteria=stopping_criteria,
-            pad_token_id=self.tokenizer.pad_token_id,
-            use_cache=True,
-            **generation_kwargs,
-        )
+        with torch.no_grad():
+            output = self.model.generate(
+                input_ids=context,
+                max_length=max_length,
+                # eos_token_id=None, # set eos_token_id to None for forcing target number of generated tokens
+                stopping_criteria=stopping_criteria,
+                pad_token_id=self.tokenizer.pad_token_id,
+                use_cache=True,
+                **generation_kwargs,
+            )
+        return output
     
 
     def _create_generate_until_requests(self, queries):
