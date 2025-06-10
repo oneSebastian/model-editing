@@ -2,7 +2,7 @@ import json
 from typing import Optional
 from tqdm import tqdm
 from ..util import Dataset, Example, Fact, Query, TestCase, TestCondition, QueryType
-
+        
 
 class ZSREDataset(Dataset):
     def __init__(self, dataset_name: str, examples: list):
@@ -24,6 +24,7 @@ class ZSREDataset(Dataset):
 
         test_cases = []
         test_cases.append(TestCase(
+                    test_case_id = 0,
                     test_dimension = "efficacy",
                     test_condition = TestCondition.OR,
                     test_queries = [Query(
@@ -34,6 +35,7 @@ class ZSREDataset(Dataset):
                     condition_queries = [],
             ))
         test_cases.append(TestCase(
+                    test_case_id = 1,
                     test_dimension = "paraphrase",
                     test_condition = TestCondition.OR,
                     test_queries = [Query(
@@ -44,6 +46,7 @@ class ZSREDataset(Dataset):
                     condition_queries = [],
             ))
         test_cases.append(TestCase(
+                    test_case_id = 2,
                     test_dimension = "neighborhood",
                     test_condition = TestCondition.OR,
                     test_queries = [Query(
@@ -62,11 +65,18 @@ class ZSREDataset(Dataset):
         )
 
     @staticmethod
-    def from_file(data_directory, force_query_type: Optional[QueryType]=None, limit=0):
+    def from_file(data_directory, force_query_type: Optional[QueryType]=None, limit=0, dev_split=False, dev_split_size=512):
         with open(f"{data_directory}/zsre_mend_eval.json", 'r') as f:
             examples = json.load(f)
         example_list = []
+        if dev_split:
+            limit = dev_split_size
+        else:
+            if limit > 0:
+                limit += dev_split_size
         for i, example_data in tqdm(enumerate(examples), desc=f"Reading data from file: {data_directory}zsre_mend_eval.json"):
+            if not dev_split and i < dev_split_size:
+                continue
             if limit and i >= limit:
                 break
             #if i % 100 == 0:

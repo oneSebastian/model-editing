@@ -1,6 +1,6 @@
 from copy import deepcopy
 from typing import Any, Dict, List, Tuple
-from peft import get_peft_model, AdaLoraConfig, TaskType, get_peft_model_state_dict, set_peft_model_state_dict, LoraConfig
+from peft import get_peft_model, AdaLoraConfig, TaskType, get_peft_model_state_dict, set_peft_model_state_dict, LoraConfig, PeftModelForCausalLM
 import torch
 from transformers import AutoModelForCausalLM, AutoTokenizer, AutoProcessor
 
@@ -9,14 +9,11 @@ from .lora_multimodal_hparams import LoRAMultimodalHyperParams
 
 
 def apply_lora_to_model(
-        model: AutoModelForCausalLM,
+        model: PeftModelForCausalLM,
         tok: AutoTokenizer,
         requests: List[Dict],
         hparams: LoRAHyperParams,
         lora_device,
-        copy=False,
-        return_orig_weights=False,
-        keep_original_weight=False,
         **kwargs: Any,
 ) -> Tuple[AutoModelForCausalLM, Dict[str, Any]]:
     """
@@ -25,24 +22,17 @@ def apply_lora_to_model(
         Note that you are responsible for deallocating the new model's memory to avoid leaks.
     :return: (1) the updated model, (2) the weights that changed
     """
-    weights_copy = {}
-    if copy:
-        #TODO: lets not copy
-        raise ValueError("SEB: lets not copy anything while tracing cuda out of memory errors")
-        model = deepcopy(model)
 
-    edited_model = execute_lora(model, tok, requests, hparams, lora_device, keep_original_weight)
-
-    return edited_model, weights_copy
+    execute_lora(model, tok, requests, hparams, lora_device)
+    return
 
 
 def execute_lora(
-        model: AutoModelForCausalLM,
+        model: PeftModelForCausalLM,
         tok: AutoTokenizer,
         requests: List[Dict],
         hparams: LoRAHyperParams,
         lora_device,
-        keep_original_weight=False,
         **kwargs: Any,
 ) -> Dict[str, Tuple[torch.Tensor]]:
     """
@@ -50,33 +40,10 @@ def execute_lora(
     Invariant: model at beginning of function == model at end of function
     """
     print("DEBUG Starting LORA execution")
-    model.config.use_cache = False
-    model.supports_gradient_checkpointing = True  #
-    model.gradient_checkpointing_enable()
-    model.enable_input_require_grads()
-    if hparams.lora_type == "lora":
-        Config = LoraConfig
-    elif hparams.lora_type == "adalora":
-        Config = AdaLoraConfig
-    else:
-        raise NotImplementedError
-    if not keep_original_weight and hasattr(model,'peft_config'):
-        peft_model = model
-    else:
-        peft_config = Config(
-            task_type=TaskType.CAUSAL_LM,
-            inference_mode=False,
-            r=hparams.rank,
-            lora_alpha=hparams.lora_alpha, lora_dropout=hparams.lora_dropout,
-            layers_to_transform=hparams.layers if len(hparams.layers) > 0 else None,
-            target_modules=hparams.target_modules
-        )
-        peft_model = get_peft_model(model, peft_config)
-
-    peft_model.is_parallelizable = True
-    peft_model.model_parallel = True
-    if hasattr(peft_model, 'print_trainable_parameters'):
-        peft_model.print_trainable_parameters()
+    model.is_parallelizable = True
+    model.model_parallel = True
+    if hasattr(model, 'print_trainable_parameters'):
+        model.print_trainable_parameters()
     requests = deepcopy(requests)
     for request in requests:
         if '{}' in request['prompt']:
@@ -95,7 +62,7 @@ def execute_lora(
 
     # Configure optimizer / gradients
     opt = torch.optim.Adam(
-        peft_model.parameters(),
+        model.parameters(),
         lr=hparams.lr,
         weight_decay=hparams.weight_decay,
     )
@@ -121,7 +88,7 @@ def execute_lora(
                     device
                 )
                 inputs['labels'] = target_ids
-                logits = peft_model(**inputs).logits
+                logits = model(**inputs).logits
                 unmasked_log_probs = logits.log_softmax(-1).gather(-1, inputs['labels'].unsqueeze(-1)).squeeze(-1)
                 mask = inputs['labels'] != -100
                 n_tokens = mask.float().sum()
@@ -155,7 +122,7 @@ def execute_lora(
                 #    print(k, v)
                 #print("DEBUG LORA:", tok.decode(tokens["input_ids"][0]))
                 tokens = tokens.to(device)
-                pred = peft_model(**tokens)
+                pred = model(**tokens)
                 loss = pred.loss
                 # pred = peft_model(**tokens)
                 # loss = pred.loss
@@ -181,7 +148,8 @@ def execute_lora(
         # if loss_meter.avg < 1e-3:
         #     break
     print("DEBUG Executed LORA")
-    return peft_model
+    # TODO: No need to return model. Changes should have been made in place
+    return
 
 
 

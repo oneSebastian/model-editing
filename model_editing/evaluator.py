@@ -42,6 +42,7 @@ class ExampleResult:
 class Evaluator:
     def __init__(
             self,
+            experiment_name,
             model_name,
             editor_name,
             control_task_dict,
@@ -55,9 +56,11 @@ class Evaluator:
             eval_batch_size=8,
             random_seed=42,
             save_path=None,
+            dev_split=False,
             device="cuda",
             verbose=False,
             ):
+        self.experiment_name
         self.model_name = model_name
         self.device=device
         self.editor_name = editor_name
@@ -74,10 +77,20 @@ class Evaluator:
         self.evaluate_generate_lengths = evaluate_generate_lengths
         self.use_chat_template = use_chat_template
         self.save_path = save_path
+        self.result_path = f"{self.save_path}/{self.experiment_name}"
         self.editing_results = []
         self.lm_results = []
         self.num_batches = math.ceil(len(self.dataset.examples) / edit_batch_size)
         self.verbose=verbose
+
+        with open(self.result_path + '.txt', "w") as f:
+            f.write(f"Experiment name: {self.experiment_name}\n")
+            f.write(f"model_name: {self.model_name}\n")
+            f.write(f"editor_name: {self.editor_name}\n")
+            f.write(f"edit batch size: {self.edit_batch_size}\n")
+            f.write(f"use_chat_template: {self.use_chat_template}\n")
+            f.write(f"dev split: {dev_split}\n")
+            f.write(f"dataset name: {self.dataset.dataset_name}\n")
 
         if self.evaluate_generate_lengths and self.save_path is None:
             raise ValueError("evaluate_generate_length requires a save_path to write outputs to.")
@@ -118,15 +131,15 @@ class Evaluator:
         #if editor_name == 'rome':
         #    self.model_editor = ROMEModelEditor(query_executor)
         if self.editor_name == 'no-edit':
-            self.lm = NoEditModel(model, model_name, tokenizer, batch_size=self.eval_batch_size, use_chat_template=self.use_chat_template, verbose=self.verbose)
+            self.lm = NoEditModel(model, model_name, tokenizer, batch_size=self.eval_batch_size, use_chat_template=self.use_chat_template, verbose=self.verbose, log_path=self.result_path + ".txt")
         elif self.editor_name == 'memit':
-            self.lm = MEMITModel(model, model_name, tokenizer, batch_size=self.eval_batch_size, use_chat_template=self.use_chat_template, verbose=self.verbose)
+            self.lm = MEMITModel(model, model_name, tokenizer, batch_size=self.eval_batch_size, use_chat_template=self.use_chat_template, verbose=self.verbose, log_path=self.result_path + ".txt")
         elif self.editor_name == 'in-context':
-            self.lm = InContextModel(model, model_name, tokenizer, batch_size=self.eval_batch_size, use_chat_template=self.use_chat_template, verbose=self.verbose)
+            self.lm = InContextModel(model, model_name, tokenizer, batch_size=self.eval_batch_size, use_chat_template=self.use_chat_template, verbose=self.verbose, log_path=self.result_path + ".txt")
         elif self.editor_name == 'context-retriever':
-            self.lm = ContextRetrieverModel(model, model_name, tokenizer, batch_size=self.eval_batch_size, use_chat_template=self.use_chat_template, verbose=self.verbose)
+            self.lm = ContextRetrieverModel(model, model_name, tokenizer, batch_size=self.eval_batch_size, use_chat_template=self.use_chat_template, verbose=self.verbose, log_path=self.result_path + ".txt")
         elif self.editor_name == 'lora':
-            self.lm = LORAModel(model, model_name, tokenizer, batch_size=self.eval_batch_size, use_chat_template=self.use_chat_template, verbose=self.verbose)
+            self.lm = LORAModel(model, model_name, tokenizer, batch_size=self.eval_batch_size, use_chat_template=self.use_chat_template, verbose=self.verbose, log_path=self.result_path + ".txt")
         else:
             raise ValueError(f"{editor_name} is not a supported model editor")
     
@@ -425,7 +438,7 @@ class Evaluator:
         self.eval_time = end_time - start_time
         
     
-    def save_results(self, save_path):
+    def save_results(self):
         # self.results is a list of ExampleResult objects
         editing_df = pd.DataFrame(columns=[
             'model', 'editor', 'dataset', 'dataset_split', 'batch_id', 'batch_position', 'example_id', 'successful_edit', 'dimension', 'test_cases', 'valid_test_cases',
@@ -480,12 +493,12 @@ class Evaluator:
         # save full results for future use
         editing_df = editing_df.replace("N/A", float("nan"))
         lm_df = lm_df.replace("N/A", float("nan"))
-        editing_df.to_parquet(save_path + '_ke.parquet')
-        lm_df.to_parquet(save_path + '_lm.parquet')
+        editing_df.to_parquet(self.result_path + '_ke.parquet')
+        lm_df.to_parquet(self.result_path + '_lm.parquet')
         if self.evaluate_generate_lengths:
-            self.df_generate_lengths.to_parquet(save_path + '_generate_lengths')
+            self.df_generate_lengths.to_parquet(self.result_path + '_generate_lengths')
         
-        with open(save_path + '.txt', "w") as f:
+        with open(self.result_path + '.txt', "a") as f:
             # write out evaluation time
             minutes, seconds = divmod(self.eval_time, 60)
             hours, minutes = divmod(minutes, 60)

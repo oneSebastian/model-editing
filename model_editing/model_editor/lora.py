@@ -3,11 +3,16 @@ import os
 import torch
 import gc
 import inspect
+from peft import set_peft_model_state_dict
 from typing import Dict, List, Literal, Optional, Tuple, Union
 from transformers import (
     AutoModelForCausalLM,
     AutoTokenizer,
 )
+from copy import deepcopy
+from peft import get_peft_model, AdaLoraConfig, TaskType, get_peft_model_state_dict, set_peft_model_state_dict, LoraConfig
+from .lora_src.lora_hparams import LoRAHyperParams
+from .lora_src.lora_multimodal_hparams import LoRAMultimodalHyperParams
 from .util import EditModel
 from ..queryexecutor import QueryExecutor
 from .lora_src.lora_main import apply_lora_to_model
@@ -24,6 +29,7 @@ class LORAModel(EditModel):
         batch_size: Optional[int]=16,
         use_chat_template: bool=False,
         verbose: bool=False,
+        log_path: Optional[str]=None,
     ):
         QueryExecutor.__init__(
             self,
@@ -33,8 +39,40 @@ class LORAModel(EditModel):
             batch_size=batch_size,
             use_chat_template=use_chat_template,
             verbose=verbose,
+            log_path=log_path,
         )
         self._original_model = None
+
+        # prepare peft model for editing
+        self.hparams = LoRAHyperParams.from_hparams(LORAModel.hparam_map(self._model_name))
+        self._model.config.use_cache = False
+        self._model.supports_gradient_checkpointing = True  #
+        self._model.gradient_checkpointing_enable()
+        self._model.enable_input_require_grads()
+        if self.hparams.lora_type == "lora":
+            Config = LoraConfig
+        elif self.hparams.lora_type == "adalora":
+            Config = AdaLoraConfig
+        else:
+            raise NotImplementedError
+
+        #log lora hyperparamaters
+        with open(self.log_path, "a") as f:
+            f.write(f"LoRA hyper parameters:\n")
+        for param_name, param_value in vars(self.hparams).items():
+            with open(self.log_path, "a") as f:
+                f.write(f"    {param_name}: {param_value}\n")
+
+        peft_config = Config(
+            task_type=TaskType.CAUSAL_LM,
+            inference_mode=False,
+            r=self.hparams.rank,
+            lora_alpha=self.hparams.lora_alpha, lora_dropout=self.hparams.lora_dropout,
+            layers_to_transform=self.hparams.layers if len(self.hparams.layers) > 0 else None,
+            target_modules=self.hparams.target_modules
+        )
+        self._model = get_peft_model(self._model, peft_config)
+        self.original_lora_weights = deepcopy(get_peft_model_state_dict(self._model))
     
 
     def _format_fact(self, fact):
@@ -61,12 +99,11 @@ class LORAModel(EditModel):
     def edit_model(self, facts):
         requests = [self._format_fact(fact) for fact in facts]
         # each request needs to be dict with key "prompt" and "target_new"
-        hparams = LoRAHyperParams.from_hparams(LORAModel.hparam_map(self._model_name))
-        self._model, _ = apply_lora_to_model(
+        apply_lora_to_model(
             self._model,
             self.tokenizer,
             requests,
-            hparams,
+            self.hparams,
             lora_device=self._device,
         )
 
@@ -81,6 +118,14 @@ class LORAModel(EditModel):
 
 
     def restore_model(self):
+        set_peft_model_state_dict(self._model, self.original_lora_weights)
+        return
+        self._model = self._model.base_model.model
+        gc.collect()
+        torch.cuda.empty_cache()
+        print("Post restoration model type:", type(self._model))
+        return
+
         # Visual debugging
         import objgraph
         objgraph.show_backrefs([self._model], filename='model_refs.png')

@@ -84,7 +84,8 @@ class TestCondition(Enum):
 
 
 class TestCase:
-    def __init__(self, test_dimension: str, test_condition: TestCondition, test_queries: list[Query], condition_queries: list[Query]):
+    def __init__(self, test_case_id: int, test_dimension: str, test_condition: TestCondition, test_queries: list[Query], condition_queries: list[Query]):
+        self.test_case_id = test_case_id
         self.test_dimension = test_dimension
         self.test_condition = test_condition
         self.test_queries = test_queries

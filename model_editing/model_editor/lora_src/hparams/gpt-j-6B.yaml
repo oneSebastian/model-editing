@@ -7,7 +7,7 @@ layers: []
 num_steps: 50
 batch_size: 1
 max_length: 30
-lr: 5e-3
+lr: 1e-3
 weight_decay: 0
 kl_factor: 0
 rank: 8

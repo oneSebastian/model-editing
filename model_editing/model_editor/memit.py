@@ -21,6 +21,7 @@ class MEMITModel(EditModel):
         batch_size: Optional[int]=16,
         use_chat_template: bool=False,
         verbose: bool=False,
+        log_path: Optional[str]=None,
     ):
         QueryExecutor.__init__(
             self,
@@ -30,6 +31,7 @@ class MEMITModel(EditModel):
             batch_size=batch_size,
             use_chat_template=use_chat_template,
             verbose=verbose,
+            log_path=log_path
         )
         self._changed_weights = None
     

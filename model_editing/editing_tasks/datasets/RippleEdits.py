@@ -29,6 +29,7 @@ class RippleEditsDataset(Dataset):
 
         # load test cases
         test_cases = []
+        test_case_id = 0
         axes = ['Relation_Specificity', 'Logical_Generalization', 'Subject_Aliasing', 'Compositionality_I', 'Compositionality_II', 'Forgetfulness']
         for axis in axes:
             for test_case_data in data_dict[axis]:
@@ -43,11 +44,13 @@ class RippleEditsDataset(Dataset):
                 # RippleEdits condition queries are for now always treated as generate queries to ease comparability
                 condition_queries = [Query.from_dict(query, query_type=QueryType.GEN) for query in test_case_data["condition_queries"]]
                 test_case = TestCase(
+                    test_case_id=test_case_id,
                     test_dimension=axis,
                     test_condition=test_condition,
                     test_queries=test_queries,
                     condition_queries=condition_queries,
                 )
+                test_case_id += 1
                 test_cases.append(test_case)
 
         return Example(
@@ -59,7 +62,7 @@ class RippleEditsDataset(Dataset):
         )
 
     @staticmethod
-    def from_file(data_directory, force_query_type: Optional[QueryType]=None, split=None, limit=0):
+    def from_file(data_directory, force_query_type: Optional[QueryType]=None, split=None, limit=0, dev_split=False, dev_split_size=512):
         if split is None:
             dataset_name = "RippleEdits"
             splits = ["popular", "random", "recent"]
@@ -68,6 +71,15 @@ class RippleEditsDataset(Dataset):
             splits = [split]
         
         # load dataset
+        split_dev_limits = dict()
+        for split in splits:
+            split_dev_limits[split] = dev_split_size // len(splits)
+        split_dev_limits[splits[0]] += dev_split_size % len(splits)
+        split_limits = dict()
+        for split in splits:
+            split_limits[split] = limit // len(splits) if limit > 0 else 0
+        split_limits[splits[0]] += limit % len(splits)
+
         example_list = []
         example_id = 0
         for split in splits:
@@ -75,8 +87,14 @@ class RippleEditsDataset(Dataset):
                 examples = json.load(f)
             for i, example_data in tqdm(enumerate(examples), desc=f"Reading data from file: {data_directory}extended_{split}.json"):
                 example_id += 1
-                if limit > 0 and i >= limit / len(splits):
-                    break
+                if not dev_split and i < split_dev_limits[split]:
+                    continue
+                elif not dev_split: # i >= split_dev_limits[split]
+                    if split_limits[split] > 0 and i >= split_limits[split]:
+                        continue
+                elif dev_split and i >= split_dev_limits[split]:
+                    continue
+                # print(f"dev_split={dev_split}, split={split}, example_id={example_id}, i={i}")
                 example = RippleEditsDataset.parse_example(example_id, split, example_data, force_query_type)
                 
                 # TODO: This check is taken from the RippleEdits benchmark; memit model editor fails when it is given such empty strings

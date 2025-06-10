@@ -24,6 +24,7 @@ class ContextRetrieverModel(EditModel):
         use_chat_template: bool=False,
         edit_template: Union[bool, str]=1,
         verbose: bool=False,
+        log_path: Optional[str]=None,
     ):
         QueryExecutor.__init__(
             self,
@@ -34,6 +35,7 @@ class ContextRetrieverModel(EditModel):
             use_chat_template=use_chat_template,
             editor_applies_chat_template=use_chat_template,
             verbose=verbose,
+            log_path=log_path
         )
         self.embedding_model = AutoModel.from_pretrained("facebook/contriever-msmarco").to(self._device)
         self.embedding_tokenizer = AutoTokenizer.from_pretrained("facebook/contriever-msmarco")

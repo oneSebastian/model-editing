@@ -21,6 +21,7 @@ class InContextModel(EditModel):
         batch_size: Optional[int]=16,
         use_chat_template: bool=False,
         verbose: bool=False,
+        log_path: Optional[str]=None,
     ):
         QueryExecutor.__init__(
             self,
@@ -31,6 +32,7 @@ class InContextModel(EditModel):
             use_chat_template=use_chat_template,
             editor_applies_chat_template=use_chat_template,
             verbose=verbose,
+            log_path=log_path,
         )
         self.edit_context = ""
         self.edit_facts = []

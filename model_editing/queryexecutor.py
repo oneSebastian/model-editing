@@ -28,6 +28,7 @@ class QueryExecutor(HFLM):
             transformers.PreTrainedTokenizerFast,
         ],
         verbose: bool = False, # print results of queries for debugging
+        log_path: Optional[str] = None, # path to log for example hyperparameters to
         use_chat_template: bool = False, # SEB: add option to use simple chat template for all queries
         editor_applies_chat_template: bool = False, # Seb: for in context editors chat template doesnt need to be applied by base class
         backend: Literal["default", "causal", "seq2seq"] = "causal",
@@ -59,6 +60,7 @@ class QueryExecutor(HFLM):
         self._config = self._model.config
 
         self.argmax_batch_size = batch_size
+        self.log_path = log_path
         self.use_chat_template = use_chat_template
         self.editor_applies_chat_template = editor_applies_chat_template
         # TODO: use more systematic way to define verbosity

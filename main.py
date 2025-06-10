@@ -47,6 +47,7 @@ def evaluate(args):
         evaluate_generate_lengths = args.evaluate_generate_lengths,
         force_query_type = args.force_query_type,
         use_chat_template = args.use_chat_template,
+        dev_split=args.dev_split,
         dataset_base_path = args.dataset_base_path,
         save_path = args.results_dir,
         device=args.device
@@ -60,11 +61,15 @@ def analyze(args):
     if not args.evaluate_generate_lengths:
         print(result.aggregated_editing_data.to_string())
         if args.to_csv:
-            result.aggregated_editing_data[["accuracy"]].round(3).to_csv(sys.stdout, index=True)
+            csv_data = result.aggregated_editing_data
+            if not csv_data.empty:
+                csv_data[["accuracy"]].round(3).to_csv(sys.stdout, index=True)
         result.load_aggregated_control_data(args.results_dir)
         print(result.aggregated_control_data.to_string())
         if args.to_csv:
-            result.aggregated_control_data[["model", "editor", "task", "metric", "n-samples", "higher_is_better", "score"]].round(3).to_csv(sys.stdout, index=False)
+            csv_data = result.aggregated_control_data
+            if not csv_data.empty:
+                csv_data[["model", "editor", "task", "metric", "n-samples", "higher_is_better", "score"]].round(3).to_csv(sys.stdout, index=False)
     else:
         raise NotImplementedError("Analysis of generate lengths not refactored yet")
 
@@ -88,6 +93,7 @@ def main():
     eval_parser.add_argument("--device", type=str, default="cuda")
     eval_parser.add_argument("--config", type=str, default="config/default_config.yaml", help="Path to config file")
     eval_parser.add_argument("--use_chat_template", action="store_true", help="Add flag to signify that model is instruction tuned; use chat template for queries")
+    eval_parser.add_argument("--dev_split", action="store_true", help="Use dev split of datasets for development or hyper-parameter tuning")
 
     analyze_parser = subparsers.add_parser("analyze", help="Analyze results")
     analyze_parser.add_argument("--results_dir", type=str, default="results/", help="Directory of evaluation result files")
