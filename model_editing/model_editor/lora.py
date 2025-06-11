@@ -29,6 +29,7 @@ class LORAModel(EditModel):
         batch_size: Optional[int]=16,
         use_chat_template: bool=False,
         verbose: bool=False,
+        external_hparams: Optional[dict]=None,
         log_path: Optional[str]=None,
     ):
         QueryExecutor.__init__(
@@ -45,6 +46,9 @@ class LORAModel(EditModel):
 
         # prepare peft model for editing
         self.hparams = LoRAHyperParams.from_hparams(LORAModel.hparam_map(self._model_name))
+        for param, value in external_hparams.items():
+            setattr(self.hparams, param, value) 
+        
         self._model.config.use_cache = False
         self._model.supports_gradient_checkpointing = True  #
         self._model.gradient_checkpointing_enable()
@@ -57,11 +61,12 @@ class LORAModel(EditModel):
             raise NotImplementedError
 
         #log lora hyperparamaters
-        with open(self.log_path, "a") as f:
-            f.write(f"LoRA hyper parameters:\n")
-        for param_name, param_value in vars(self.hparams).items():
+        if self.log_path:
             with open(self.log_path, "a") as f:
-                f.write(f"    {param_name}: {param_value}\n")
+                f.write(f"LoRA hyper parameters:\n")
+            for param_name, param_value in vars(self.hparams).items():
+                with open(self.log_path, "a") as f:
+                    f.write(f"    {param_name}: {param_value}\n")
 
         peft_config = Config(
             task_type=TaskType.CAUSAL_LM,
