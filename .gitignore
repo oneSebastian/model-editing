@@ -2,10 +2,14 @@
 results/
 data/stats/
 config/default_config.yaml
+config/grid_parameters_config.yaml
 tests/
 pytest.ini
 model_editing.egg-info/
-nohup.out
+nohup*
+experiments.txt
+debug_*
+tmp.py
 
 # ignore all datasets other than RippleEdits
 data/datasets/*

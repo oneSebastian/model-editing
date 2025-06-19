@@ -7,9 +7,10 @@ from ..util import Dataset, Example, Fact, Query, TestCase, TestCondition, Query
 class MQuAKEDataset(Dataset):
     def __init__(self, dataset_name: str, examples: list):
         super().__init__(dataset_name, examples)
+
     
     @staticmethod
-    def parse_example(split: str, data_dict: dict, force_query_type):
+    def parse_example(id: int, split: str, data_dict: dict, force_query_type):
         facts = []
         for fact_data in data_dict["requested_rewrite"]:
             fact_query_answers = [fact_data["target_new"]["str"]]
@@ -24,7 +25,9 @@ class MQuAKEDataset(Dataset):
                 target = fact_data["target_new"]["str"],
                 original_target = fact_data["target_true"]["str"],
                 fact_query = Query(
-                    prompt = fact_data["prompt"].replace("{}", fact_data["subject"]),
+                    #prompt = fact_data["prompt"].replace("{}", fact_data["subject"]),
+                    # seb, since test cases use question answer format I will do the same for fact queries
+                    prompt=fact_data["question"],
                     answers = fact_query_answers,
                     query_type=QueryType.GEN if force_query_type is None else force_query_type,
                 ),
@@ -39,12 +42,12 @@ class MQuAKEDataset(Dataset):
             ))
 
         test_case = TestCase(
-                test_dimension = "default",
+                test_case_id=0,
+                test_dimension = f"{len(data_dict['orig']['triples'])}-hop",
                 test_condition = TestCondition.OR,
                 test_queries = test_queries,
                 condition_queries = [],
         )
-
         return Example(
             example_id=data_dict["case_id"],
             example_type="default",
@@ -54,18 +57,25 @@ class MQuAKEDataset(Dataset):
         )
 
     @staticmethod
-    def from_file(data_directory, force_query_type: Optional[QueryType]=None, split=None, limit=0):
+    def from_file(data_directory, force_query_type: Optional[QueryType]=None, split=None, limit=0, dev_split=False, dev_split_size=512):
         if split is None:
             dataset_name = "MQuAKE"
             split = "CF-3k-v2"
         else:
             dataset_name = "MQuAKE_" + split
-        with open(f"{data_directory}MQuAKE-{split}.json", 'r') as f:
+        with open(f"{data_directory}/MQuAKE-{split}.json", 'r') as f:
             examples = json.load(f)
         example_list = []
+        if dev_split:
+            limit = dev_split_size
+        else:
+            if limit > 0:
+                limit += dev_split_size
         for i, example_data in tqdm(enumerate(examples), desc=f"Reading data from file: {data_directory}MQuAKE-{split}.json"):
+            if not dev_split and i < dev_split_size:
+                continue
             if limit > 0 and i >= limit:
                 break
-            example = MQuAKEDataset.parse_example(split, example_data, force_query_type)
+            example = MQuAKEDataset.parse_example(i, split, example_data, force_query_type)
             example_list.append(example)
         return MQuAKEDataset(dataset_name, example_list)

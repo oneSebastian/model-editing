@@ -8,6 +8,7 @@ import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 import plotly.express as px
 
+
 class EvalResult():
     def __init__(self, editing_data=None, control_data=None):
         self.editing_data = editing_data
@@ -32,8 +33,8 @@ class EvalResult():
         aggregate_by = ["model", "editor", "dataset"]
         if groupby_dataset_splits:
             aggregate_by.append("dataset_split")
-        if groupby_dimensions:
-            aggregate_by.append("dimension")
+        #if groupby_dimensions:
+        aggregate_by.append("dimension")
         
         def sum_dicts(dicts):
             result = {}
@@ -59,6 +60,19 @@ class EvalResult():
             df["accuracy"] = df.apply(lambda row: divide_dict(row["accuracy"], row["valid_test_cases"]), axis=1)
         else:
             df["accuracy"] = df["accuracy"] / df["valid_test_cases"]
+        
+        if not groupby_dimensions:
+            aggregate_by.remove("dimension")
+            df = df.groupby(aggregate_by).agg({
+                'test_cases': 'sum',
+                'valid_test_cases': 'sum',
+                'verify_test_case_time': 'sum',
+                'edit_time': 'sum',
+                'eval_time': 'sum',
+                'accuracy': (lambda x: sum_dicts(x)) if evaluate_generate_lengths else 'mean',
+                'valid_test_case_ratio': 'mean',
+                'experiment_count': 'sum',
+            })
 
         self.aggregated_editing_data = df
         return

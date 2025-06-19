@@ -46,12 +46,23 @@ class Query:
     @staticmethod
     def from_dict(query_dict: dict, query_type: QueryType):
         answer_candidates = [[answer["value"]] + answer["aliases"] for answer in query_dict["answers"]]
-        return Query(
-            prompt=query_dict["prompt"],
-            answers = [[alias for alias in answer if len(alias) > 1 or alias.isdigit()] for answer in answer_candidates],
-            query_type=query_type,
-            phrase=query_dict["phrase"]
-        )
+        all_answers = []
+        for answer in answer_candidates:
+            all_alias = []
+            for alias in answer:
+                if len(alias) > 1 or alias.isdigit():
+                    all_alias.append(alias)
+            if len(all_alias) > 0:
+                all_answers.append(all_alias)
+        if len(all_answers) == 0:
+            return None
+        else:
+            return Query(
+                    prompt=query_dict["prompt"],
+                    answers = all_answers,
+                    query_type=query_type,
+                    phrase=query_dict["phrase"]
+                )
 
     def __str__(self):
         return f"Query: prompt={self.prompt}, answers={[self.answers]}"
@@ -72,7 +83,7 @@ class Fact:
             "subject": self.subject,
             "target": self.target,
             "original_target": self.original_target,
-            "query": self.query.to_dict(),
+            "query": self.query.to_dict() if self.query else None,
             "question": self.question,
         }
 
@@ -84,7 +95,8 @@ class TestCondition(Enum):
 
 
 class TestCase:
-    def __init__(self, test_dimension: str, test_condition: TestCondition, test_queries: list[Query], condition_queries: list[Query]):
+    def __init__(self, test_case_id: int, test_dimension: str, test_condition: TestCondition, test_queries: list[Query], condition_queries: list[Query]):
+        self.test_case_id = test_case_id
         self.test_dimension = test_dimension
         self.test_condition = test_condition
         self.test_queries = test_queries

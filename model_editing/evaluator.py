@@ -9,9 +9,10 @@ import numpy as np
 from collections import defaultdict
 from lm_eval import evaluate
 from .models import load_model
-from .model_editor import NoEditModel, InContextModel, MEMITModel, ContextRetrieverModel
+from .model_editor import NoEditModel, InContextModel, MEMITModel, ContextRetrieverModel, LORAModel
 from .editing_tasks.util import TestCondition, QueryType
 from copy import deepcopy
+from model_editing.analysis import EvalResult
 
 class DimensionResult:
     def __init__(self, accuracy: Union[float, dict]=0.0, test_cases=0, valid_test_cases=0):
@@ -40,7 +41,29 @@ class ExampleResult:
 
 
 class Evaluator:
-    def __init__(self, model_name, editor_name, control_task_dict, control_task_data, control_data_boundaries, dataset, dataset_sample_size=None, edit_batch_size=1, sequential_editing=False, evaluate_generate_lengths=False, eval_batch_size=8, random_seed=42, save_path=None, device="cuda"):
+    def __init__(
+            self,
+            experiment_name,
+            model_name,
+            editor_name,
+            control_task_dict,
+            control_task_data,
+            control_data_boundaries,
+            dataset, dataset_sample_size=None,
+            edit_batch_size=1,
+            sequential_editing=False,
+            evaluate_generate_lengths=False,
+            use_chat_template=False,
+            edit_template_id=1,
+            eval_batch_size=8,
+            random_seed=42,
+            save_path=None,
+            dev_split=False,
+            hparams=None,
+            device="cuda",
+            verbose=False,
+            ):
+        self.experiment_name = experiment_name
         self.model_name = model_name
         self.device=device
         self.editor_name = editor_name
@@ -55,10 +78,26 @@ class Evaluator:
             self.dataset.sample(dataset_sample_size, self.random_seed)
         self.edit_batch_size = edit_batch_size
         self.evaluate_generate_lengths = evaluate_generate_lengths
+        self.use_chat_template = use_chat_template
+        self.edit_template_id = edit_template_id
         self.save_path = save_path
+        self.result_path = f"{self.save_path}/{self.experiment_name}" if self.save_path else None
         self.editing_results = []
         self.lm_results = []
         self.num_batches = math.ceil(len(self.dataset.examples) / edit_batch_size)
+        self.verbose=verbose
+        self.hparams = hparams
+
+        if self.result_path:
+            with open(self.result_path + '.txt', "w") as f:
+                f.write(f"Experiment name: {self.experiment_name}\n")
+                f.write(f"model_name: {self.model_name}\n")
+                f.write(f"editor_name: {self.editor_name}\n")
+                f.write(f"edit batch size: {self.edit_batch_size}\n")
+                f.write(f"use_chat_template: {self.use_chat_template}\n")
+                f.write(f"dev split: {dev_split}\n")
+                f.write(f"dataset name: {self.dataset.dataset_name}\n")
+                f.write(f"number of dataset examples: {len(self.dataset.examples)}\n")
 
         if self.evaluate_generate_lengths and self.save_path is None:
             raise ValueError("evaluate_generate_length requires a save_path to write outputs to.")
@@ -99,17 +138,20 @@ class Evaluator:
         #if editor_name == 'rome':
         #    self.model_editor = ROMEModelEditor(query_executor)
         if self.editor_name == 'no-edit':
-            self.lm = NoEditModel(model, model_name, tokenizer, batch_size=self.eval_batch_size)
+            self.lm = NoEditModel(model, model_name, tokenizer, batch_size=self.eval_batch_size, use_chat_template=self.use_chat_template, verbose=self.verbose, log_path=self.result_path + ".txt" if self.result_path else None)
         elif self.editor_name == 'memit':
-            self.lm = MEMITModel(model, model_name, tokenizer, batch_size=self.eval_batch_size)
+            self.lm = MEMITModel(model, model_name, tokenizer, batch_size=self.eval_batch_size, use_chat_template=self.use_chat_template, verbose=self.verbose, log_path=self.result_path + ".txt" if self.result_path else None)
         elif self.editor_name == 'in-context':
-            self.lm = InContextModel(model, model_name, tokenizer, batch_size=self.eval_batch_size)
+            self.lm = InContextModel(model, model_name, tokenizer, batch_size=self.eval_batch_size, use_chat_template=self.use_chat_template, verbose=self.verbose, log_path=self.result_path + ".txt" if self.result_path else None)
         elif self.editor_name == 'context-retriever':
-            self.lm = ContextRetrieverModel(model, model_name, tokenizer, batch_size=self.eval_batch_size)
+            self.lm = ContextRetrieverModel(model, model_name, tokenizer, batch_size=self.eval_batch_size, use_chat_template=self.use_chat_template, edit_template_id=self.edit_template_id, verbose=self.verbose, log_path=self.result_path + ".txt" if self.result_path else None)
+        elif self.editor_name == 'lora':
+            self.lm = LORAModel(model, model_name, tokenizer, batch_size=self.eval_batch_size, use_chat_template=self.use_chat_template, verbose=self.verbose, external_hparams=self.hparams, log_path=self.result_path + ".txt" if self.result_path else None)
         else:
             raise ValueError(f"{editor_name} is not a supported model editor")
     
     def _evaluate_examples(self, batch_id, examples):
+        print("DEBUG Verify test cases")
         # check condition queries to determine which test_cases are valid.
         verify_test_case_start_time = time.perf_counter()
         batch_results = []
@@ -141,10 +183,14 @@ class Evaluator:
                 if all(condition_results[(example_idx, test_case_idx)]):
                     example_result.dimension_results[test_case.test_dimension].valid_test_cases += 1
                     valid_test_cases.append(test_case)
+            if self.verbose:
+                print(f"DEBUG example {example_idx} has {len(valid_test_cases)}/{len(example.test_cases)} valid test cases")
             example.test_cases = valid_test_cases
         verify_test_case_time = time.perf_counter() - verify_test_case_start_time
-            
+        
+
         # Edit model
+        print("DEBUG Edit model")
         start_time = time.perf_counter()
         self.lm.edit_model([fact for _example in examples for fact in _example.facts])
         edit_time = time.perf_counter() - start_time
@@ -153,6 +199,7 @@ class Evaluator:
         test_queries_start_time = time.perf_counter()
 
         # Run fact queries
+        print("DEBUG run fact queries")
         queries = defaultdict(list)
         for example_idx, example in enumerate(examples):
             example_result = batch_results[example_idx]
@@ -204,6 +251,7 @@ class Evaluator:
             example_result.dimension_results["fact_queries"].accuracy = accuracy
         
         # Run test queries
+        print("DEBUG run test queries")
         queries = defaultdict(list)
         for example_idx, example in enumerate(examples):
             example_result = batch_results[example_idx]
@@ -292,6 +340,7 @@ class Evaluator:
             example_result.eval_time = test_queries_time
         
         # run control_tasks on edited model
+        print("DEBUG run control tasks")
         if self.control_task_dict is not None:
             # first prepare control_task data for this batch
             batch_task_dict = deepcopy(self.control_task_dict)
@@ -330,6 +379,7 @@ class Evaluator:
                     lm=self.lm,
                     task_dict=batch_task_dict,
                     bootstrap_iters=0,
+                    apply_chat_template=self.lm.use_chat_template,
                 )
                 duration = time.perf_counter() - start_time
 
@@ -366,11 +416,11 @@ class Evaluator:
                 lm_batch_results = None
         else:
             lm_batch_results = None
-        
+        print("DEBUG batch done")
+
         # Restore model
         # TODO: we don't support sequential editing at the moment
-        #if not self.sequential_editing:
-        #    self.lm.restore_model()
+        self.lm.restore_model()
 
         return batch_results, lm_batch_results
 
@@ -395,7 +445,7 @@ class Evaluator:
         self.eval_time = end_time - start_time
         
     
-    def save_results(self, save_path):
+    def save_results(self):
         # self.results is a list of ExampleResult objects
         editing_df = pd.DataFrame(columns=[
             'model', 'editor', 'dataset', 'dataset_split', 'batch_id', 'batch_position', 'example_id', 'successful_edit', 'dimension', 'test_cases', 'valid_test_cases',
@@ -450,13 +500,74 @@ class Evaluator:
         # save full results for future use
         editing_df = editing_df.replace("N/A", float("nan"))
         lm_df = lm_df.replace("N/A", float("nan"))
-        editing_df.to_parquet(save_path + '_ke.parquet')
-        lm_df.to_parquet(save_path + '_lm.parquet')
+        editing_df.to_parquet(self.result_path + '_ke.parquet')
+        lm_df.to_parquet(self.result_path + '_lm.parquet')
+        print(f"results saved at {self.result_path}")
         if self.evaluate_generate_lengths:
-            self.df_generate_lengths.to_parquet(save_path + '_generate_lengths')
+            self.df_generate_lengths.to_parquet(self.result_path + '_generate_lengths')
         
-        with open(save_path + '.txt', "w") as f:
+        with open(self.result_path + '.txt', "a") as f:
             # write out evaluation time
             minutes, seconds = divmod(self.eval_time, 60)
             hours, minutes = divmod(minutes, 60)
             f.write(f"Total evaluation time: {hours}:{minutes}:{seconds}\n\n")
+        
+
+    def get_aggregate_results(self):
+        editing_df = pd.DataFrame(columns=[
+            'model', 'editor', 'dataset', 'dataset_split', 'batch_id', 'batch_position', 'example_id', 'successful_edit', 'dimension', 'test_cases', 'valid_test_cases',
+                'accuracy', 'verify_test_case_time', 'edit_time', 'eval_time',
+            ])
+        lm_df = pd.DataFrame(columns=['model', 'editor', 'dataset', 'batch_id', 'eval_time', 'results', 'higher_is_better', 'n-samples', 'group_subtasks'])
+                                    
+        for example_result in self.editing_results:
+            for dimension, dimension_result in example_result.dimension_results.items():
+                if self.evaluate_generate_lengths:
+                    if isinstance(dimension_result.accuracy, dict):
+                        accuracy = {str(k): v for k, v in dimension_result.accuracy.items()}
+                    else:
+                        assert dimension_result.accuracy == 0.0
+                        assert dimension_result.valid_test_cases == 0
+                        accuracy = {str(k): 0.0 for k in  range(1, 64 + 1)}
+                else:
+                    accuracy = dimension_result.accuracy
+                data = {
+                    'model': self.model_name,
+                    'editor': self.editor_name,
+                    'dataset': self.dataset.dataset_name,
+                    'dataset_split': example_result.dataset_split,
+                    'batch_id': example_result.batch_id,
+                    'batch_position': example_result.batch_position,
+                    'example_id': example_result.example_id,
+                    'successful_edit': example_result.successful_edit,
+                    'dimension': dimension,
+                    'test_cases': dimension_result.test_cases,
+                    'valid_test_cases': dimension_result.valid_test_cases,
+                    'accuracy': accuracy,
+                    'verify_test_case_time': example_result.verify_test_case_time,
+                    'edit_time': example_result.edit_time,
+                    'eval_time': example_result.eval_time,
+                }
+                editing_df.loc[len(editing_df)] = data
+
+        for result in self.lm_results:
+            data = {
+                'model': self.model_name,
+                'editor': self.editor_name,
+                'dataset': self.dataset.dataset_name,
+                'batch_id': result['batch_id'],
+                'eval_time': result['eval_time'],
+                'results': result['results'],
+                'higher_is_better': result['higher_is_better'],
+                'n-samples': result['n-samples'],
+                'group_subtasks': result['group_subtasks'],
+            }
+            lm_df.loc[(len(lm_df))] = data
+    
+        editing_df = editing_df.replace("N/A", float("nan"))
+        lm_df = lm_df.replace("N/A", float("nan"))
+
+        eval_result = EvalResult(editing_data=editing_df, control_data=lm_df)
+        eval_result.aggregate_editing_data(groupby_dimensions=True, groupby_dataset_splits=False, exclude_fact_queries=True)
+        return eval_result.aggregated_editing_data
+        

@@ -27,6 +27,10 @@ class QueryExecutor(HFLM):
             transformers.PreTrainedTokenizer,
             transformers.PreTrainedTokenizerFast,
         ],
+        verbose: bool = False, # print results of queries for debugging
+        log_path: Optional[str] = None, # path to log for example hyperparameters to
+        use_chat_template: bool = False, # SEB: add option to use simple chat template for all queries
+        editor_applies_chat_template: bool = False, # Seb: for in context editors chat template doesnt need to be applied by base class
         backend: Literal["default", "causal", "seq2seq"] = "causal",
         revision: Optional[str] = "main",
         subfolder: Optional[str] = None,
@@ -50,12 +54,17 @@ class QueryExecutor(HFLM):
         **kwargs,
     ) -> None:
         TemplateLM.__init__(self)
-        self._model = model.to(device)
+        self._model = model
         self._model_name = model_name
         self._device = self._model.device
         self._config = self._model.config
 
         self.argmax_batch_size = batch_size
+        self.log_path = log_path
+        self.use_chat_template = use_chat_template
+        self.editor_applies_chat_template = editor_applies_chat_template
+        # TODO: use more systematic way to define verbosity
+        self.verbose = verbose
 
         # determine which of 'causal' and 'seq2seq' backends to use for HF models
         self._get_backend(
@@ -119,16 +128,77 @@ class QueryExecutor(HFLM):
     @property
     def max_gen_toks(self) -> int:
         return self._max_gen_toks
+    
+
+    def apply_chat_to_single_prompt(self, prompt):
+        conversation = [{"role": "user", "content": prompt}]
+        return self.tokenizer.apply_chat_template(
+            conversation,
+            tokenize=False,
+            add_generation_prompt=True,
+        )
+
+
+    def apply_chat_to_prompt_and_model_answer(self, prompt, response):
+        chat_messages = [
+            {"role": "user", "content": prompt},
+            {"role": "assistant", "content": response},
+        ]
+        prompt_only_messages = chat_messages[:-1]
+        full_prompt = self.tokenizer.apply_chat_template(prompt_only_messages, tokenize=False, add_generation_prompt=True)
+        continuation = self.tokenizer.apply_chat_template(chat_messages, tokenize=False)[len(full_prompt):]
+        # TODO: Should I mirror the behavior following behavior?: https://github.com/EleutherAI/lm-evaluation-harness/blob/8bc4afff22e73995883de41018388428e39f8a92/docs/chat-template-readme.md
+        #if continuation.startswith(" "):
+        #    continuation = continuation[1:]
+        return full_prompt, continuation
+    
+
+    def _model_generate(self, context, max_length, stop, **generation_kwargs):
+        # temperature = 0.0 if not set
+        # if do_sample is false and temp==0.0:
+        # remove temperature, as do_sample=False takes care of this
+        # and we don't want a warning from HF
+        generation_kwargs["temperature"] = generation_kwargs.get("temperature", 0.0)
+        do_sample = generation_kwargs.get("do_sample", None)
+
+        # The temperature has to be a strictly positive float -- if it is 0.0, use greedy decoding strategies
+        if generation_kwargs.get("temperature") == 0.0 and do_sample is None:
+            generation_kwargs["do_sample"] = do_sample = False
+
+        if do_sample is False and generation_kwargs.get("temperature") == 0.0:
+            generation_kwargs.pop("temperature")
+        # build stopping criteria
+        stopping_criteria = stop_sequences_criteria(
+            self.tokenizer, stop, context.shape[1], context.shape[0]
+        )
+        #print("DEBUG self._max_gen_toks, _model_generate:", self._max_gen_toks)
+        #print("DEBUG max_length:", max_length)
+        #print("DEBUG generation_kwargs", generation_kwargs)
+        if max_length:
+            generation_kwargs["max_new_tokens"] = None
+        with torch.no_grad():
+            output = self.model.generate(
+                input_ids=context,
+                max_length=max_length,
+                # eos_token_id=None, # set eos_token_id to None for forcing target number of generated tokens
+                stopping_criteria=stopping_criteria,
+                pad_token_id=self.tokenizer.pad_token_id,
+                use_cache=True,
+                **generation_kwargs,
+            )
+        return output
+    
 
     def _create_generate_until_requests(self, queries):
         return [
             Instance(
                 request_type="generate_until",
                 doc=None,
-                arguments=(queries[i].prompt, {"until": [self.tokenizer.eos_token]}),
+                arguments=(self.apply_chat_to_single_prompt(queries[i].prompt) if self.use_chat_template else queries[i].prompt, {"until": [self.tokenizer.eos_token]}),
                 idx=i,
             ) for i in range(len(queries))
         ]
+
 
     @staticmethod
     def _verify_generate_queries(queries, generated):
@@ -166,14 +236,14 @@ class QueryExecutor(HFLM):
                 results[i][length] = result
         return results, query_replies
     
-    def execute_generate_queries(self, queries, answer_length=20, evaluate_generate_lengths=False):
+    def execute_generate_queries(self, queries, answer_length=64, evaluate_generate_lengths=False):
         if evaluate_generate_lengths:
             # no answer length given; generate with length 50, but verify for all shorter lengths as well
             answer_length = 64
             tmp_max_gen_toks = self.max_gen_toks
             self._max_gen_toks = answer_length
             requests = self._create_generate_until_requests(queries)
-            generated = self.generate_until(requests, disable_tqdm=True)
+            generated = self.generate_until(requests)
             self._max_gen_toks = tmp_max_gen_toks
             results, query_replies = self._verify_generate_queries_all_lengths(queries, generated, answer_length)
             return results, query_replies
@@ -182,7 +252,12 @@ class QueryExecutor(HFLM):
             tmp_max_gen_toks = self._max_gen_toks
             self._max_gen_toks = answer_length
             requests = self._create_generate_until_requests(queries)
-            generated = self.generate_until(requests, disable_tqdm=True)
+            # print("DEBUG self._max_gen_toks, execute_generate_queries:", self._max_gen_toks)
+            generated = self.generate_until(requests)
+            if self.verbose:
+                for i, request in enumerate(requests):
+                    print(f"arguments: {request.arguments}")
+                    print("generated:", generated[i])
             self._max_gen_toks = tmp_max_gen_toks
             results = self._verify_generate_queries(queries, generated)
             return results
@@ -194,11 +269,15 @@ class QueryExecutor(HFLM):
             assert (query.answer_options is not None) and (len(query.answer_options) > 1), "options queries require multiple answer options"
             for option in query.answer_options:
                 assert isinstance(option, str)
+                if self.use_chat_template:
+                    argument_prompt, argument_option = self.apply_chat_to_prompt_and_model_answer(query.prompt, option)
+                else:
+                    argument_prompt, argument_option = query.prompt, f" {option}"
                 requests.append(
                     Instance(
                     request_type="loglikelihood",
                     doc=None,
-                    arguments=(query.prompt, f" {option}"),
+                    arguments=(argument_prompt, argument_option),
                     idx=i,
                 ))
                 i += 1
@@ -206,7 +285,11 @@ class QueryExecutor(HFLM):
 
     def execute_options_queries(self, queries):
         requests = self._create_options_requests(queries)
-        responses = self.loglikelihood(requests, disable_tqdm=True)
+        responses = self.loglikelihood(requests, disable_tqdm=False)
+        if self.verbose:
+            for i, request in enumerate(requests):
+                print("arguments:", request.arguments)
+                print("response:", responses[i])
         assert len(requests) == len(responses)
 
         # check query responses
@@ -223,15 +306,24 @@ class QueryExecutor(HFLM):
         return results
     
     def create_argmax_inputs(self, queries):
+        bos = self.tokenizer.bos_token_id
+        eos = self.tokenizer.eos_token_id
         argmax_inputs = []
         for query in queries:
-            prompt_ids = self.tokenizer.encode(query.prompt, return_tensors='pt')
-            answer_start = prompt_ids.shape[-1]
             if isinstance(query.answers[0], str):
                 answer = query.answers[0]
             else:
                 answer = next(item for sublist in query.answers for item in sublist)
-            answer_tokens = self.tokenizer.encode(" " + answer, return_tensors='pt')
+            if self.use_chat_template and not self.editor_applies_chat_template:
+                prompt, answer = self.apply_chat_to_prompt_and_model_answer(query.prompt, answer)
+            else:
+                prompt = query.prompt
+                answer = " " + answer
+            prompt_ids = self.tokenizer.encode(prompt, return_tensors='pt', add_special_tokens=False)
+            answer_start = prompt_ids.shape[-1]
+            answer_tokens = self.tokenizer.encode(answer, return_tensors='pt', add_special_tokens=False)
+            if answer_tokens[0][-1] == eos:
+                answer_tokens = answer_tokens[:,:-1]
             answer_length = answer_tokens.shape[-1]
             inputs = torch.cat((prompt_ids, answer_tokens), dim=-1)
             argmax_inputs.append((inputs, answer_start, answer_length, answer_tokens))
@@ -240,17 +332,38 @@ class QueryExecutor(HFLM):
     def execute_argmax_queries(self, queries):
         argmax_inputs = self.create_argmax_inputs(queries)
         results = []
+        #print("DEBUG self.argmax_batch_size:", self.argmax_batch_size)
         for i in range(0, len(argmax_inputs), self.argmax_batch_size):
             batch_inputs = argmax_inputs[i:min(i + self.argmax_batch_size, len(argmax_inputs))]
             # batch and pad input ids
             m = max(_[0].shape[1] for _ in batch_inputs)
-            pad_token = self.tokenizer.encode(self.tokenizer.pad_token)[0]
+            pad_token = self.tokenizer.pad_token_id
             padded_inputs = [
                 torch.cat([inputs[0], torch.full((1, m - inputs[0].shape[1]), pad_token)], dim=1)
                 for inputs in batch_inputs
             ]
-            inputs = torch.cat(padded_inputs, dim=0).to(self._device)
-            attention_mask = torch.where(inputs != pad_token, 1, 0).to(self._device)
+            # load tensors to input device in case model is spread
+            input_device = next(self._model.parameters()).device
+            inputs = torch.cat(padded_inputs, dim=0).to(input_device) 
+            attention_mask = torch.where(inputs != pad_token, 1, 0).to(input_device)
+            #print("DEBUG inputs shape:", inputs.shape)
+            with torch.no_grad():
+                outputs = self._model(inputs, attention_mask=attention_mask)
+                logits = outputs.logits
+                max_tokens = torch.argmax(logits, dim=-1)
+                for j, inputs in enumerate(batch_inputs):
+                    _, answer_start, answer_length, answer_tokens = inputs
+                    query_results = []
+                    for k in range(answer_tokens.shape[1]):
+                        if answer_tokens[0][k] == self.tokenizer.eos_token_id: # stop when we hit an eos token
+                            break
+                        query_results.append((max_tokens[j][answer_start - 1 + k] == answer_tokens[0][k]).item())
+                        #if self.verbose:
+                        #    print(f"{self.tokenizer.decode([max_tokens[j][answer_start - 1 + k]])}, {self.tokenizer.decode([answer_tokens[0][k]])}, {query_results[-1]}")
+                    results.append(query_results)
+            del outputs, logits, max_tokens  # free memory
+            torch.cuda.empty_cache()
+            '''
             with torch.no_grad():
                 outputs = self._model(inputs, attention_mask=attention_mask)
             logits = outputs.logits
@@ -261,6 +374,12 @@ class QueryExecutor(HFLM):
                 for k in range(answer_tokens.shape[1]):
                     query_results.append((max_tokens[j][answer_start - 1 + k] == answer_tokens[0][k]).item())
                 results.append(query_results)
+            '''
+        input_tokens_list = [_[0] for _ in argmax_inputs]
+        if self.verbose:
+            for i, input_tokens in enumerate(input_tokens_list):
+                print("inputs:", self.tokenizer.decode(input_tokens[0]))
+                print("result:", results[i])
         return results
     
     # The base QueryExecutor overwrites loglikelihood_rolling, because in context editors use loglikelihood method instead to compute loglikelihood of request sequence conditional on edit sequence

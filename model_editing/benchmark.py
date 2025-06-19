@@ -13,16 +13,16 @@ from .control_tasks.load_lm_eval import load_control_task_dict
 from .editing_tasks.util import QueryType
 
 
-def load_dataset(dataset_base_path, editing_task, split=None, sample_size=None, force_query_type=None):
+def load_dataset(dataset_base_path, editing_task, split=None, sample_size=None, force_query_type=None, dev_split=False):
     limit = sample_size if sample_size else 0
     if editing_task == "RippleEdits":
-        dataset = RippleEditsDataset.from_file(f"{dataset_base_path}/RippleEdits/", split=split, limit=limit, force_query_type=force_query_type)
+        dataset = RippleEditsDataset.from_file(f"{dataset_base_path}/RippleEdits/", split=split, limit=limit, force_query_type=force_query_type, dev_split=dev_split)
     elif editing_task == "MQuAKE":
-        dataset = MQuAKEDataset.from_file(f"{dataset_base_path}/MQuAKE/", split=split, limit=limit, force_query_type=force_query_type)
+        dataset = MQuAKEDataset.from_file(f"{dataset_base_path}/MQuAKE/", split=split, limit=limit, force_query_type=force_query_type, dev_split=dev_split)
     elif editing_task == "CounterFact":
-        dataset = CounterFactDataset.from_file(f"{dataset_base_path}/CounterFact/", limit=limit, force_query_type=force_query_type)
+        dataset = CounterFactDataset.from_file(f"{dataset_base_path}/CounterFact/", limit=limit, force_query_type=force_query_type, dev_split=dev_split)
     elif editing_task == "zsRE":
-        dataset = ZSREDataset.from_file(f"{dataset_base_path}/zsRE/", limit=limit, force_query_type=force_query_type)
+        dataset = ZSREDataset.from_file(f"{dataset_base_path}/zsRE/", limit=limit, force_query_type=force_query_type, dev_split=dev_split)
     else:
         raise ValueError("This benchmark only supports the datasets RippleEdits, MQuAKE, CounterFact and zsRE.")
     return dataset
@@ -40,12 +40,16 @@ def run_experiment(
         dataset_sample_size,
         edit_batch_size,
         evaluate_generate_lengths,
+        use_chat_template,
+        edit_template_id,
         eval_batch_size,
         device,
         save_path,
+        dev_split,
 ):
     print(f"Run experiment: {experiment_name}", flush=True)
     evaluator = Evaluator(
+        experiment_name = experiment_name,
         model_name = model_name,
         editor_name = editor_name,
         control_task_dict = control_task_dict,
@@ -55,16 +59,17 @@ def run_experiment(
         dataset_sample_size=dataset_sample_size,
         edit_batch_size = edit_batch_size,
         evaluate_generate_lengths = evaluate_generate_lengths,
+        use_chat_template = use_chat_template,
+        edit_template_id = edit_template_id,
         eval_batch_size = eval_batch_size,
         save_path=save_path,
         device=device,
+        dev_split=dev_split,
     )
 
     # run evaluation for this experiment
     evaluator.evaluate()
-    result_path = f"{save_path}/{experiment_name}"
-    evaluator.save_results(save_path=result_path)
-    print(f"results saved at {result_path}")
+    evaluator.save_results()
 
 
 def download_dataset(dataset, dataset_path):
@@ -103,6 +108,9 @@ def benchmark_knowledge_editing(
     sample_size: Optional[int],
     evaluate_generate_lengths: bool,
     force_query_type: Optional[QueryType],
+    use_chat_template: bool,
+    edit_template_id: int,
+    dev_split: bool,
     dataset_base_path: str,
     save_path: str,
     device: str,
@@ -153,8 +161,8 @@ def benchmark_knowledge_editing(
     control_task_dict, control_task_data, control_data_boundaries = load_control_task_dict(control_tasks=control_tasks, editing_tasks=editing_tasks, target_splits=target_splits)
 
     for model_name, model_editor, editing_task in product(model_names, model_editors, editing_tasks):
-        experiment_name = f'{model_name}_{model_editor}_{editing_task}_{edit_batch_size}{('_' + str(sample_size)) if sample_size else ''}'
-        dataset = load_dataset(dataset_base_path, editing_task, sample_size=sample_size, force_query_type=force_query_type)
+        experiment_name = f"{model_name}_{model_editor}_{editing_task}_{edit_batch_size}{('_' + str(sample_size)) if sample_size else ''}"
+        dataset = load_dataset(dataset_base_path, editing_task, sample_size=sample_size, force_query_type=force_query_type, dev_split=dev_split)
         run_experiment(
             experiment_name=experiment_name,
             model_name=model_name,
@@ -167,9 +175,12 @@ def benchmark_knowledge_editing(
             dataset_sample_size=sample_size,
             edit_batch_size=edit_batch_size,
             evaluate_generate_lengths=evaluate_generate_lengths,
+            use_chat_template=use_chat_template,
+            edit_template_id=edit_template_id,
             eval_batch_size=eval_batch_size,
             device=device,
             save_path=save_path,
+            dev_split=dev_split,
         )
 
         

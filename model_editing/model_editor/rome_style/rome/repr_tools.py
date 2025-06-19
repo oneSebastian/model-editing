@@ -72,13 +72,22 @@ def get_words_idxs_in_templates(
     # Tokenize to determine lengths
     assert len(prefixes) == len(words) == len(suffixes)
     n = len(prefixes)
-    batch_tok = tok([*prefixes, *words, *suffixes])
+    batch_tok = tok([*prefixes, *words, *suffixes], add_special_tokens=False)
 
     batch_tok = batch_tok['input_ids']
 
     prefixes_tok, words_tok, suffixes_tok = [
         batch_tok[i : i + n] for i in range(0, n * 3, n)
     ]
+
+    #print("START DEBUG get_words_idxs_in_templates")
+    #for i, _toks in enumerate([prefixes_tok, words_tok, suffixes_tok]):
+    #    print(f"    i={i}")
+    #    for tokens in _toks:
+    #        if tokens:
+    #            print(f"tokens[0]={tokens[0]}, tok.pad_token_id={tok.pad_token_id}")
+    #            print(f"tokens={tokens}, decoded={tok.decode(tokens)}")
+    #print("END DEBUG get_words_idxs_in_templates")
 
     if isinstance(tok, LlamaTokenizer) or isinstance(tok, LlamaTokenizerFast):
         words_tok = [tokens[1:] if tokens[0] == 29871 else tokens for tokens in words_tok]
@@ -122,6 +131,7 @@ def get_reprs_at_idxs(
     """
 
     def _batch(n):
+        #print(f"in _batch: n={n}, len(contexts)={len(contexts)}")
         for i in range(0, len(contexts), n):
             yield contexts[i : i + n], idxs[i : i + n]
 
@@ -140,11 +150,14 @@ def get_reprs_at_idxs(
         if len(cur_repr)==0: 
             return
         cur_repr = cur_repr[0] if type(cur_repr) is tuple else cur_repr
+        #print("cur_repr:", type(cur_repr), cur_repr.shape)
+        #print("batch_idxs:", batch_idxs)
+        # exit()
         for i, idx_list in enumerate(batch_idxs):
             to_return[key].append(cur_repr[i][idx_list].mean(0))
 
     for batch_contexts, batch_idxs in _batch(n=128):
-        contexts_tok = tok(batch_contexts, padding=True, return_tensors="pt").to(
+        contexts_tok = tok(batch_contexts, padding=True, add_special_tokens=False, return_tensors="pt").to(
             next(model.parameters()).device
         )
 
