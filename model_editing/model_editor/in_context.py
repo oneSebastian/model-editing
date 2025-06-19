@@ -20,6 +20,7 @@ class InContextModel(EditModel):
         tokenizer: Union[PreTrainedTokenizer, PreTrainedTokenizerFast],
         batch_size: Optional[int]=16,
         use_chat_template: bool=False,
+        edit_template_id: Union[bool, str]=1,
         verbose: bool=False,
         log_path: Optional[str]=None,
     ):
@@ -36,12 +37,30 @@ class InContextModel(EditModel):
         )
         self.edit_context = ""
         self.edit_facts = []
+        self.edit_template_id = edit_template_id
         self.edit_tokens = None
+        if self.use_chat_template:
+            raise NotImplementedError("In Context Editor hasn't been updated for chat templates. You can use context editor with number retrieved edits equal to edit batch size instead.")
+
+    def get_edit_context(self, fact_sentences):
+        if self.edit_template_id == 0:
+            return "Imagine that " + " ".join(fact_sentences) + "\n"
+        elif self.edit_template_id == 1:
+            instruction = "### Instruction\n\nYour internal knowledge is out of date. The following facts are true. " \
+            "Disregard any conflicting knowledge that you might have regarding the named entities. Do not print out any inaccuracies in the provided fact. " \
+            "Only complete the request that is provided.\n\n### Updated Facts\n\n"
+            facts = "\n".join(["- " + fact_sentence for fact_sentence in fact_sentences])
+            pre_prompt = "\n### Request to answer\n\n"
+            return instruction + facts + pre_prompt
+        elif self.edit_template_id == "test_empty":
+            return ""
+        else:
+            raise ValueError(f"{self.edit_template_id} is not a recognised edit context template id.")
 
     def edit_model(self, facts):
         self.edit_facts += facts
         contextualised_facts = [f"{fact.prompt} {fact.target}." for fact in self.edit_facts]
-        context = "Imagine that " + " ".join(contextualised_facts) + "\n"
+        context = self.get_edit_context(contextualised_facts)
         self.edit_context = context
         self.edit_tokens = self.tokenizer.encode(context, return_tensors='pt')
 

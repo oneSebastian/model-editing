@@ -46,8 +46,9 @@ class LORAModel(EditModel):
 
         # prepare peft model for editing
         self.hparams = LoRAHyperParams.from_hparams(LORAModel.hparam_map(self._model_name))
-        for param, value in external_hparams.items():
-            setattr(self.hparams, param, value) 
+        if external_hparams is not None:
+            for param, value in external_hparams.items():
+                setattr(self.hparams, param, value) 
         
         self._model.config.use_cache = False
         self._model.supports_gradient_checkpointing = True  #
@@ -72,9 +73,11 @@ class LORAModel(EditModel):
             task_type=TaskType.CAUSAL_LM,
             inference_mode=False,
             r=self.hparams.rank,
-            lora_alpha=self.hparams.lora_alpha, lora_dropout=self.hparams.lora_dropout,
+            lora_alpha=self.hparams.lora_alpha,
+            lora_dropout=self.hparams.lora_dropout,
             layers_to_transform=self.hparams.layers if len(self.hparams.layers) > 0 else None,
-            target_modules=self.hparams.target_modules
+            target_modules=self.hparams.target_modules,
+            total_step=self.hparams.num_steps,
         )
         self._model = get_peft_model(self._model, peft_config)
         self.original_lora_weights = deepcopy(get_peft_model_state_dict(self._model))
@@ -93,6 +96,8 @@ class LORAModel(EditModel):
     def hparam_map(model_name):
         if model_name == "gpt-j":
             return "model_editing/model_editor/lora_src/hparams/gpt-j-6B"
+        elif model_name == "gpt2-xl":
+            return "model_editing/model_editor/lora_src/hparams/gpt2-xl"
         elif model_name == "mistral_7B":
             return "model_editing/model_editor/lora_src/hparams/mistral_7B"
         elif model_name == "mistral_7B_instruct":

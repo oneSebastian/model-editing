@@ -41,6 +41,7 @@ def run_experiment(
         edit_batch_size,
         evaluate_generate_lengths,
         use_chat_template,
+        edit_template_id,
         eval_batch_size,
         device,
         save_path,
@@ -59,6 +60,7 @@ def run_experiment(
         edit_batch_size = edit_batch_size,
         evaluate_generate_lengths = evaluate_generate_lengths,
         use_chat_template = use_chat_template,
+        edit_template_id = edit_template_id,
         eval_batch_size = eval_batch_size,
         save_path=save_path,
         device=device,
@@ -68,7 +70,6 @@ def run_experiment(
     # run evaluation for this experiment
     evaluator.evaluate()
     evaluator.save_results()
-    print(f"results saved at {result_path}")
 
 
 def download_dataset(dataset, dataset_path):
@@ -108,6 +109,7 @@ def benchmark_knowledge_editing(
     evaluate_generate_lengths: bool,
     force_query_type: Optional[QueryType],
     use_chat_template: bool,
+    edit_template_id: int,
     dev_split: bool,
     dataset_base_path: str,
     save_path: str,
@@ -159,7 +161,7 @@ def benchmark_knowledge_editing(
     control_task_dict, control_task_data, control_data_boundaries = load_control_task_dict(control_tasks=control_tasks, editing_tasks=editing_tasks, target_splits=target_splits)
 
     for model_name, model_editor, editing_task in product(model_names, model_editors, editing_tasks):
-        experiment_name = f'{model_name}_{model_editor}_{editing_task}_{edit_batch_size}{('_' + str(sample_size)) if sample_size else ''}'
+        experiment_name = f"{model_name}_{model_editor}_{editing_task}_{edit_batch_size}{('_' + str(sample_size)) if sample_size else ''}"
         dataset = load_dataset(dataset_base_path, editing_task, sample_size=sample_size, force_query_type=force_query_type, dev_split=dev_split)
         run_experiment(
             experiment_name=experiment_name,
@@ -174,6 +176,7 @@ def benchmark_knowledge_editing(
             edit_batch_size=edit_batch_size,
             evaluate_generate_lengths=evaluate_generate_lengths,
             use_chat_template=use_chat_template,
+            edit_template_id=edit_template_id,
             eval_batch_size=eval_batch_size,
             device=device,
             save_path=save_path,

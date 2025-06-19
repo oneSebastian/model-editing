@@ -22,9 +22,11 @@ class ContextRetrieverModel(EditModel):
         tokenizer: Union[PreTrainedTokenizer, PreTrainedTokenizerFast],
         batch_size: Optional[int]=16,
         use_chat_template: bool=False,
-        edit_template: Union[bool, str]=1,
+        edit_template_id: Union[bool, str]=1,
         verbose: bool=False,
         log_path: Optional[str]=None,
+        retrieve_k: int=4,
+        embedding_model: str="facebook/contriever-msmarco",
     ):
         QueryExecutor.__init__(
             self,
@@ -37,16 +39,25 @@ class ContextRetrieverModel(EditModel):
             verbose=verbose,
             log_path=log_path
         )
-        self.embedding_model = AutoModel.from_pretrained("facebook/contriever-msmarco").to(self._device)
-        self.embedding_tokenizer = AutoTokenizer.from_pretrained("facebook/contriever-msmarco")
+        self.embedding_model = AutoModel.from_pretrained(embedding_model).to(self._device)
+        self.embedding_tokenizer = AutoTokenizer.from_pretrained(embedding_model)
         self.edit_facts = []
         self.fact_embeddings = None
-        self.edit_template = edit_template
+        self.edit_template_id = edit_template_id
+        self.retrieve_k = retrieve_k
 
         self.chat_template_beginning = "<s>[INST]"
         if self.use_chat_template and self._model_name != "mistral_7B_instruct":
             # TODO: generalise implementation
             raise NotImplementedError("In context editing with chat template is currently only implemented for Mistral-7B-Instruct-v0.3. We have a hard coded assumption that the first user quers starts with \"<s>[INST]\"")
+
+        if self.log_path:
+            with open(self.log_path, "a") as f:
+                f.write("Context retriever parameters:\n")
+                f.write(f"    retrieve_k: {self.retrieve_k}\n")
+                f.write(f"    embedding_model: {embedding_model}\n")
+                f.write(f"    edit_template_id: {self.edit_template_id}\n")
+
 
     def mean_pooling(self, token_embeddings, mask):
         token_embeddings = token_embeddings.masked_fill(~mask[..., None].bool(), 0.)
@@ -65,13 +76,13 @@ class ContextRetrieverModel(EditModel):
         all_embs = torch.vstack(all_embs)
         return all_embs
 
-    def retrieve_facts(self, query, k=4):
+    def retrieve_facts(self, query):
         inputs = self.embedding_tokenizer([query], padding=True, truncation=True, return_tensors='pt').to(self._device)
         with torch.no_grad():
             outputs = self.embedding_model(**inputs)
             query_emb = self.mean_pooling(outputs[0], inputs['attention_mask']).cpu()
         sim = (query_emb @ self.fact_embeddings.T)[0]
-        knn = sim.topk(min(k, sim.shape[0]), largest=True)
+        knn = sim.topk(min(self.retrieve_k, sim.shape[0]), largest=True)
         return knn.indices
 
     def edit_model(self, facts):
@@ -84,19 +95,19 @@ class ContextRetrieverModel(EditModel):
             self.fact_embeddings = embs
 
     def get_edit_context(self, fact_sentences):
-        if self.edit_template == 0:
+        if self.edit_template_id == 0:
             return "Imagine that " + " ".join(fact_sentences) + "\n"
-        elif self.edit_template == 1:
+        elif self.edit_template_id == 1:
             instruction = "### Instruction\n\nYour internal knowledge is out of date. The following facts are true. " \
             "Disregard any conflicting knowledge that you might have regarding the named entities. Do not print out any inaccuracies in the provided fact. " \
             "Only complete the request that is provided.\n\n### Updated Facts\n\n"
             facts = "\n".join(["- " + fact_sentence for fact_sentence in fact_sentences])
             pre_prompt = "\n### Request to answer\n\n"
             return instruction + facts + pre_prompt
-        elif self.edit_template == "test_empty":
+        elif self.edit_template_id == "test_empty":
             return ""
         else:
-            raise ValueError(f"{template} is not a recognised edit context template id.")
+            raise ValueError(f"{self.edit_template_id} is not a recognised edit context template id.")
 
     def get_prompt_context(self, prompt):
         if self.fact_embeddings is None:
@@ -235,6 +246,10 @@ class ContextRetrieverModel(EditModel):
                 idx=request.idx,
             ))
         contextualised_results = HFLM.loglikelihood(self, contextualised_requests, disable_tqdm)
+        if not contextualised_results:
+            print("DEBGUG empty contextualised_results:")
+            for request in contextualised_requests:
+                print("DEBUG request arguments:", request.arguments)
         return [_[0] for _ in contextualised_results]
     
     def create_argmax_inputs(self, queries):

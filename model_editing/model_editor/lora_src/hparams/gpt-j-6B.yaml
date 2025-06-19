@@ -4,10 +4,10 @@ device: 0
 
 lora_type: "adalora"
 layers: []
-num_steps: 50
+num_steps: 20
 batch_size: 1
 max_length: 30
-lr: 1e-3
+lr: 5e-03
 weight_decay: 0
 kl_factor: 0
 rank: 8

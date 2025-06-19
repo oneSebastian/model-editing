@@ -4,6 +4,7 @@ import yaml
 from model_editing.benchmark import benchmark_knowledge_editing
 from model_editing.editing_tasks.util import QueryType
 from model_editing.analysis import EvalResult
+from model_editing.grid_search import perform_grid_search, show_grid_search_results
 
 
 def int_or_none(arg):
@@ -47,6 +48,7 @@ def evaluate(args):
         evaluate_generate_lengths = args.evaluate_generate_lengths,
         force_query_type = args.force_query_type,
         use_chat_template = args.use_chat_template,
+        edit_template_id = args.edit_template_id,
         dev_split=args.dev_split,
         dataset_base_path = args.dataset_base_path,
         save_path = args.results_dir,
@@ -74,6 +76,18 @@ def analyze(args):
         raise NotImplementedError("Analysis of generate lengths not refactored yet")
 
 
+def grid_search(args):
+    config_path = getattr(args, "parameter_config_file", "config/grid_parameters_config.yaml")
+    config = load_config(config_path)
+    if args.evaluate:
+        # perform grid search
+        perform_grid_search(config, save_id=args.save_id)
+    else:
+        # view grid search results
+        show_grid_search_results(config, results_file=args.results_file)
+
+
+
 def main():
     parser = argparse.ArgumentParser(description="Benchmark model editing.")
     subparsers = parser.add_subparsers(dest="command", required=True)
@@ -93,6 +107,7 @@ def main():
     eval_parser.add_argument("--device", type=str, default="cuda")
     eval_parser.add_argument("--config", type=str, default="config/default_config.yaml", help="Path to config file")
     eval_parser.add_argument("--use_chat_template", action="store_true", help="Add flag to signify that model is instruction tuned; use chat template for queries")
+    eval_parser.add_argument("--edit_template_id", type=int, default=1, help="Id for edit template; relevant only to context editors.")
     eval_parser.add_argument("--dev_split", action="store_true", help="Use dev split of datasets for development or hyper-parameter tuning")
 
     analyze_parser = subparsers.add_parser("analyze", help="Analyze results")
@@ -103,6 +118,13 @@ def main():
     analyze_parser.add_argument("--evaluate_generate_lengths", action="store_true", help="Add flag to evaluate multiple generate lengths")
     analyze_parser.add_argument("--to_csv", action="store_true", help="Add flag to write results table to csv")
     analyze_parser.set_defaults(func=analyze)
+
+    grid_search_parser = subparsers.add_parser("grid_search", help="Perform hyper-parameter grid search")
+    grid_search_parser.add_argument("--parameter_config_file", type=str, default="config/grid_parameters_config.yaml", help="Path to file that holds parameters for grid search")
+    grid_search_parser.add_argument("--evaluate", action="store_true", help="Set flag to perform grid grid search. By default we only show results.")
+    grid_search_parser.add_argument("--save_id", type=int, default=None, help="Save id for results for parallel gris searches")
+    grid_search_parser.add_argument("--results_file", type=str, default=None, help="Path to results file for analysis")
+    grid_search_parser.set_defaults(func=grid_search)
 
     # add arguments from config file
     args = parser.parse_args()

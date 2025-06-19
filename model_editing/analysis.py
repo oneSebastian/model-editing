@@ -69,7 +69,7 @@ class EvalResult():
                 'verify_test_case_time': 'sum',
                 'edit_time': 'sum',
                 'eval_time': 'sum',
-                'accuracy': 'mean',
+                'accuracy': (lambda x: sum_dicts(x)) if evaluate_generate_lengths else 'mean',
                 'valid_test_case_ratio': 'mean',
                 'experiment_count': 'sum',
             })

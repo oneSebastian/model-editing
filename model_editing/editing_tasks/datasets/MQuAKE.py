@@ -43,7 +43,7 @@ class MQuAKEDataset(Dataset):
 
         test_case = TestCase(
                 test_case_id=0,
-                test_dimension = f"{len(data_dict["new_single_hops"])}-hop",
+                test_dimension = f"{len(data_dict['orig']['triples'])}-hop",
                 test_condition = TestCondition.OR,
                 test_queries = test_queries,
                 condition_queries = [],

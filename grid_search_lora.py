@@ -22,7 +22,7 @@ def get_grid_parameters():
     return {
         "model_names": ["mistral_7B"],
         "model_editors": ["lora"],
-        "edit_batch_size": [16, 512],
+        "edit_batch_size": [16],
         "lora_alpha": [8, 32],
         "num_steps": [20, 50],
         "learning_rate": [1e-4, 5e-3],
@@ -74,7 +74,7 @@ def evaluate_parameters(
     return df
 
 
-def run_grid_search(save_path="results/thesis/grid_search/lora/"):
+def run_grid_search(save_id=None, save_path="results/thesis/grid_search/lora/"):
     # grid_parameters = get_test_parameters()
     grid_parameters = get_grid_parameters()
     
@@ -87,17 +87,20 @@ def run_grid_search(save_path="results/thesis/grid_search/lora/"):
         grid_combinations.append(param_dict)
 
     # Evaluate all combinations
-    df_path = save_path + "results.parquet"
+    if save_id is not None:
+        df_path = save_path + f"results_{save_id}.parquet"
+    else:
+        df_path = save_path + "results.parquet"
     for i, parameters in enumerate(grid_combinations):
         print(f"Evaluate combination {i+1}: {parameters}")
         result = evaluate_parameters(parameters)
         print(result.to_string())
         if Path(df_path).exists():
-            df = pd.read_parquet(file_path)
+            df = pd.read_parquet(df_path)
             df = pd.concat([df, result], ignore_index=True)
             df.to_parquet(df_path)
         else:
             result.to_parquet(df_path)
 
 
-run_grid_search()
+run_grid_search(save_id=1)

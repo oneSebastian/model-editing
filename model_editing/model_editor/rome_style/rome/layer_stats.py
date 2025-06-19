@@ -98,20 +98,50 @@ def layer_stats(
             ds_name,
             dict(wikitext="wikitext-103-raw-v1", wikipedia="20220301.en")[ds_name],
         )
-        if isinstance(model, LlamaForCausalLM) or isinstance(model, GPTNeoXForCausalLM) or isinstance(model, MistralForCausalLM):
-            maxlen = model.config.max_position_embeddings
-        else:
+        if hasattr(model.config, 'n_positions'):
             maxlen = model.config.n_positions
+        elif hasattr(model.config, 'max_sequence_length'):
+            maxlen = model.config.max_sequence_length
+        elif hasattr(model.config, 'max_position_embeddings'):
+            maxlen = model.config.max_position_embeddings
+        elif hasattr(model.config,'seq_length'):
+            maxlen = model.config.seq_length
+        else:
+            raise NotImplementedError
+
+        if hasattr(model.config, 'model_type') and 'mistral' in model.config.model_type:
+            if hasattr(model.config, 'sliding_window') and model.config.sliding_window:
+                maxlen = model.config.sliding_window or 4096
+            else:
+                maxlen = 4096
+        if hasattr(model.config, 'model_type') and 'qwen2' in model.config.model_type:
+            maxlen = 4096
+
         if batch_tokens is not None and batch_tokens < maxlen:
             maxlen = batch_tokens
         return TokenizedDataset(raw_ds["train"], tokenizer, maxlen=maxlen)
 
     # Continue with computation of statistics
-    batch_size = 50 # originall 100, but cuda out of memory errors occured  # Examine this many dataset texts at once
-    if isinstance(model, LlamaForCausalLM) or isinstance(model, GPTNeoXForCausalLM) or isinstance(model, MistralForCausalLM):
-        npos = model.config.max_position_embeddings
-    else:
+    batch_size = 1 # originall 100, but cuda out of memory errors occured  # Examine this many dataset texts at once
+    if hasattr(model.config, 'n_positions'):
         npos = model.config.n_positions
+    elif hasattr(model.config, 'max_sequence_length'):
+        npos = model.config.max_sequence_length
+    elif hasattr(model.config, 'max_position_embeddings'):
+        npos = model.config.max_position_embeddings
+    elif hasattr(model.config,'seq_length'):
+        npos = model.config.seq_length
+    else:
+        raise NotImplementedError
+
+    if hasattr(model.config, 'model_type') and 'mistral' in model.config.model_type:
+        if hasattr(model.config, 'sliding_window') and model.config.sliding_window:
+            npos = model.config.sliding_window or 4096
+        else:
+            npos = 4096
+    if hasattr(model.config, 'model_type') and 'qwen2' in model.config.model_type:
+            npos = 4096
+    
     if batch_tokens is None:
         batch_tokens = npos * 3  # Sort and divide into batches with this many tokens
     if precision is None:
@@ -159,8 +189,11 @@ def layer_stats(
     batch_count = -(-(sample_size or len(ds)) // batch_size)
     with torch.no_grad():
         for batch_group in progress(loader, total=batch_count):
+            #print("DEBUG layer stuts cuda error: batch_group in progress loop")
             for batch in batch_group:
-                batch = dict_to_(batch, "cuda")
+                #print("DEBUG layer stuts cuda error: batch in batch_group")
+                device = next(model.parameters()).device
+                batch = dict_to_(batch, device)
                 with Trace(
                     model, layer_name, retain_input=True, retain_output=False, stop=True
                 ) as tr:

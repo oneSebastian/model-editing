@@ -54,6 +54,7 @@ class Evaluator:
             sequential_editing=False,
             evaluate_generate_lengths=False,
             use_chat_template=False,
+            edit_template_id=1,
             eval_batch_size=8,
             random_seed=42,
             save_path=None,
@@ -78,6 +79,7 @@ class Evaluator:
         self.edit_batch_size = edit_batch_size
         self.evaluate_generate_lengths = evaluate_generate_lengths
         self.use_chat_template = use_chat_template
+        self.edit_template_id = edit_template_id
         self.save_path = save_path
         self.result_path = f"{self.save_path}/{self.experiment_name}" if self.save_path else None
         self.editing_results = []
@@ -95,6 +97,7 @@ class Evaluator:
                 f.write(f"use_chat_template: {self.use_chat_template}\n")
                 f.write(f"dev split: {dev_split}\n")
                 f.write(f"dataset name: {self.dataset.dataset_name}\n")
+                f.write(f"number of dataset examples: {len(self.dataset.examples)}\n")
 
         if self.evaluate_generate_lengths and self.save_path is None:
             raise ValueError("evaluate_generate_length requires a save_path to write outputs to.")
@@ -141,7 +144,7 @@ class Evaluator:
         elif self.editor_name == 'in-context':
             self.lm = InContextModel(model, model_name, tokenizer, batch_size=self.eval_batch_size, use_chat_template=self.use_chat_template, verbose=self.verbose, log_path=self.result_path + ".txt" if self.result_path else None)
         elif self.editor_name == 'context-retriever':
-            self.lm = ContextRetrieverModel(model, model_name, tokenizer, batch_size=self.eval_batch_size, use_chat_template=self.use_chat_template, verbose=self.verbose, log_path=self.result_path + ".txt" if self.result_path else None)
+            self.lm = ContextRetrieverModel(model, model_name, tokenizer, batch_size=self.eval_batch_size, use_chat_template=self.use_chat_template, edit_template_id=self.edit_template_id, verbose=self.verbose, log_path=self.result_path + ".txt" if self.result_path else None)
         elif self.editor_name == 'lora':
             self.lm = LORAModel(model, model_name, tokenizer, batch_size=self.eval_batch_size, use_chat_template=self.use_chat_template, verbose=self.verbose, external_hparams=self.hparams, log_path=self.result_path + ".txt" if self.result_path else None)
         else:
@@ -499,6 +502,7 @@ class Evaluator:
         lm_df = lm_df.replace("N/A", float("nan"))
         editing_df.to_parquet(self.result_path + '_ke.parquet')
         lm_df.to_parquet(self.result_path + '_lm.parquet')
+        print(f"results saved at {self.result_path}")
         if self.evaluate_generate_lengths:
             self.df_generate_lengths.to_parquet(self.result_path + '_generate_lengths')
         
