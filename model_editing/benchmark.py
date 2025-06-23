@@ -1,5 +1,6 @@
 import os
 import requests
+import random
 from pathlib import Path
 from typing import Optional, Union
 from itertools import product
@@ -114,7 +115,11 @@ def benchmark_knowledge_editing(
     dataset_base_path: str,
     save_path: str,
     device: str,
+    random_seed: int = 42,
 ):
+    # seed random
+    random.seed(random_seed)
+    
     # check if benchmark datasets are available. If not download them.
     for editing_task in editing_tasks:
         path = Path(dataset_base_path + editing_task + "/")
@@ -158,7 +163,24 @@ def benchmark_knowledge_editing(
         ("wnli", "validation"),
     ]
 
-    control_task_dict, control_task_data, control_data_boundaries = load_control_task_dict(control_tasks=control_tasks, editing_tasks=editing_tasks, target_splits=target_splits)
+    control_task_dict, control_task_data, control_data_boundaries = load_control_task_dict(control_tasks=control_tasks, editing_tasks=editing_tasks)
+
+    '''
+    def print_datasets(name, task, key_prefix):
+        if isinstance(task, dict):
+            for subtask_name, subtask in task.items():
+                print_datasets(subtask_name, subtask, key_prefix + [name.group])
+        else:
+            print(key_prefix, name)
+            for split, dataset in task.dataset.items():
+                print(split, (dataset if dataset is None else len(dataset)))
+    
+    for k, v in control_task_dict.items():
+        print_datasets(k, v, [])
+    exit()
+    '''
+
+
 
     for model_name, model_editor, editing_task in product(model_names, model_editors, editing_tasks):
         experiment_name = f"{model_name}_{model_editor}_{editing_task}_{edit_batch_size}{('_' + str(sample_size)) if sample_size else ''}"

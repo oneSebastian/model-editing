@@ -67,7 +67,8 @@ def analyze(args):
             if not csv_data.empty:
                 csv_data[["accuracy"]].round(3).to_csv(sys.stdout, index=True)
         result.load_aggregated_control_data(args.results_dir)
-        print(result.aggregated_control_data.to_string())
+        df = result.aggregated_control_data.sort_values(by=['model', 'editor', 'task', 'metric'])
+        print(df.to_string())
         if args.to_csv:
             csv_data = result.aggregated_control_data
             if not csv_data.empty:

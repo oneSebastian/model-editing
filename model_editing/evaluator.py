@@ -12,7 +12,9 @@ from .models import load_model
 from .model_editor import NoEditModel, InContextModel, MEMITModel, ContextRetrieverModel, LORAModel
 from .editing_tasks.util import TestCondition, QueryType
 from copy import deepcopy
+from model_editing.utils import access_task, detached_select
 from model_editing.analysis import EvalResult
+from model_editing.control_tasks.load_lm_eval import compute_task_boundaries
 
 class DimensionResult:
     def __init__(self, accuracy: Union[float, dict]=0.0, test_cases=0, valid_test_cases=0):
@@ -49,14 +51,14 @@ class Evaluator:
             control_task_dict,
             control_task_data,
             control_data_boundaries,
-            dataset, dataset_sample_size=None,
+            dataset,
+            dataset_sample_size=None,
             edit_batch_size=1,
             sequential_editing=False,
             evaluate_generate_lengths=False,
             use_chat_template=False,
             edit_template_id=1,
             eval_batch_size=8,
-            random_seed=42,
             save_path=None,
             dev_split=False,
             hparams=None,
@@ -72,10 +74,8 @@ class Evaluator:
         self.eval_batch_size = eval_batch_size
         self.batch_split_sizes = None
         self.dataset = dataset
-        self.random_seed = random_seed
-        random.seed(self.random_seed)
         if dataset_sample_size:
-            self.dataset.sample(dataset_sample_size, self.random_seed)
+            self.dataset.sample(dataset_sample_size)
         self.edit_batch_size = edit_batch_size
         self.evaluate_generate_lengths = evaluate_generate_lengths
         self.use_chat_template = use_chat_template
@@ -106,9 +106,10 @@ class Evaluator:
 
         # create batch boundaries of datasets for lm_eval tasks
         if self.control_task_dict is not None:
-            self.lm_eval_batch_boundaries = dict()
+            # no longer needed?: self.lm_eval_batch_boundaries = dict()
             self.batch_split_sizes = {i: defaultdict(dict) for i in range(self.num_batches)}
-
+            
+            '''
             def compute_lm_batch_boundaries(_task, _task_name, _subtask_name=None):
                 for split in self.control_task_data[(_task_name, _subtask_name)].keys():
                     data_start, data_end = control_data_boundaries[(_task_name, _subtask_name)][split]
@@ -123,13 +124,11 @@ class Evaluator:
                         else:
                             self.batch_split_sizes[i][(_task_name, _subtask_name)][split] = None
                         batch_start = batch_end
+            '''
 
-            for task_name, task in self.control_task_dict.items():
-                if isinstance(task, dict):
-                    for subtask_name, subtask in task.items():
-                        compute_lm_batch_boundaries(_task=subtask, _task_name=task_name, _subtask_name=subtask_name)
-                else:
-                    compute_lm_batch_boundaries(_task=task, _task_name=task_name)
+            for name, task in self.control_task_dict.items():
+                assert control_data_boundaries is not None
+                compute_task_boundaries(name, task, [], self.batch_split_sizes, task_boundaries=control_data_boundaries)
         
         model, tokenizer = load_model(model_name, device=device)
         
@@ -340,14 +339,54 @@ class Evaluator:
             example_result.eval_time = test_queries_time
         
         # run control_tasks on edited model
-        print("DEBUG run control tasks")
         if self.control_task_dict is not None:
+            print("DEBUG run control tasks")
             # first prepare control_task data for this batch
             batch_task_dict = deepcopy(self.control_task_dict)
+            #eval_task_dict  = dict()
+            
+            empty = True
+            empty_tasks = []
+            for task_key, split_dict in self.batch_split_sizes[batch_id].items():
+                #print(f"DEBUG: prepare lm eval task, batch_id={batch_id}: Evaluate task_key={task_key}")
+                #for k, v in split_dict.items():
+                #    print("        ", k, v)
+                # TODO: probably I need to note somewhere which split is required for execution for each lm eval task so that I know when to skip empty batches
+                if split_dict is None or None in split_dict.values():
+                    if split_dict is None:
+                        print(f"task_key={task_key}, split_dict is None")
+                    else:
+                        for k, v in split_dict.items():
+                            print(f"task_key={task_key}, k={k}, v={v}")
+                    raise ValueError("We have an evaluation task with insufficient data for this batch.")
 
+                splits = {
+                    key: 0 if split_dict[key] is None else split_dict[key][1] - split_dict[key][0] for key in split_dict
+                }
+                #print(f"DEBUG splits: task_key={task_key}, splits={splits}")
+
+                if split_dict is None:
+                    empty_tasks.append(task_key)
+                    continue
+                elif any(("validation" in key and splits[key] == 0) for key in splits):
+                    empty_tasks.append(task_key)
+                    continue
+                elif any(("test" in key and splits[key] == 0) for key in splits):
+                    empty_tasks.append(task_key)
+                    continue
+                #print("NONEMPTY TASK")
+                empty = False
+                task = access_task(batch_task_dict, task_key)
+                for split, boundary in split_dict.items():
+                    #print(f"DEBUG: batch_id={batch_id}: Evaluate task_key={task_key}, split={split}, boundary={boundary}, dataset: {len(task.dataset[split]) if task.dataset[split] is not None else None}")
+                    assert task.dataset[split] is None
+                    task.dataset[split] = detached_select(self.control_task_data[task_key][split], range(boundary[0], boundary[1]))
+                    #task.dataset[split] = self.control_task_data[task_key][split].select(range(boundary[0], boundary[1]))
+                #eval_task_dict["_".join(task_key)] = task
+            '''
             # insert lm eval data for this batch
             empty = True
-            skip_tasks = []
+            empty_tasks = []
             for task_name, task in self.control_task_dict.items():
                 if isinstance(task, dict):
                     for subtask_name, subtask in task.items():
@@ -356,21 +395,120 @@ class Evaluator:
                                 batch_task_dict[task_name][subtask_name].dataset[split] = self.control_task_data[(task_name.group, subtask_name)][split].select(range(boundary[0], boundary[1]))
                                 empty = False
                             else:
-                                skip_tasks.append((task_name, subtask_name))
+                                empty_tasks.append((task_name, subtask_name))
                 else:
                     for split, boundary in self.batch_split_sizes[batch_id][(task_name, None)].items():
                         if boundary:
                             batch_task_dict[task_name].dataset[split] = self.control_task_data[(task_name, None)][split].select(range(boundary[0], boundary[1]))
                             empty = False
                         else:
-                            skip_tasks.append((task_name,))
+                            empty_tasks.append((task_name,))
+            '''
             
             # skip empty tasks
+            skip_tasks = []
+            
+            def collect_skip_tasks(name, task, key_prefix):
+                if isinstance(task, dict):
+                    skip_task_group = True
+                    skip_individual_tasks = []
+                    for subtask_name, subtask in task.items():
+                        assert not isinstance(name, str)
+                        if collect_skip_tasks(subtask_name, subtask, key_prefix + [name.group]):
+                            skip_individual_tasks.append(subtask_name if isinstance(subtask_name, str) else subtask_name.group)
+                        else:
+                            skip_task_group = False
+                    #print(f"DEBUG skip task group {tuple(key_prefix + [name.group])}: {skip_task_group}")
+                    if skip_task_group:
+                        return True
+                    for subtask in skip_individual_tasks:
+                        #print("DEBUG append incomplete group skip:", tuple(key_prefix + [name.group, subtask]))
+                        skip_tasks.append(tuple(key_prefix + [name.group, subtask]))
+                    return False
+                else:
+                    assert isinstance(name, str)
+                    if task.dataset is None:
+                        #print(f"DEBUG skip individual task {tuple(key_prefix + [name])}: {True}")
+                        return True
+                    splits = {
+                        key: 0 if task.dataset[key] is None else len(task.dataset[key]) for key in task.dataset
+                    }
+                    #print(f"DEBUG splits: task_key={key_prefix + [name]}, splits={splits}")
+                    skip = False
+                    if any(("validation" in key and splits[key] == 0) for key in splits):
+                        skip = True
+                    elif any(("test" in key and splits[key] == 0) for key in splits):
+                        skip = True
+                    #print(f"DEBUG skip individual task {tuple(key_prefix + [name])}: {skip}")
+                    return skip
+                    empty_task = False
+                    for split, dataset in task.dataset.items():
+                        if dataset is None:
+                            empty_task = True
+                    if empty_task:
+                        empty_tasks.append(key_prefix + [name])
+                        #print("DEBUG new skip task:", empty_tasks[-1])
+            
+            for name, task in batch_task_dict.items():
+                if collect_skip_tasks(name, task, []):
+                    #print("DEBUG skip entire task:", (name,) if isinstance(name, str) else (name.group,))
+                    skip_tasks.append((name,) if isinstance(name, str) else (name.group,))
+
+            
+            #print("DEBUG skip_tasks start")
+            #for entry in skip_tasks:
+            #    print("    ", entry)
+            #print("DEBUG skip_tasks end")
+            
+            
+            #for name, task in eval_task_dict.items():
+            #    for split, split_data in task.dataset.items():
+            #        if split_data == None:
+            #            empty_tasks.append(name)
+
             for entry in skip_tasks:
-                if len(entry) == 2:
-                    del batch_task_dict[entry[0]][entry[1]]
-                elif len(entry) == 1:
-                    del batch_task_dict[entry[0]]
+                #print(f"DEBUG perform task skip:", entry)
+                task = batch_task_dict
+                while len(entry) > 1:
+                    assert isinstance(task, dict)
+                    assert isinstance(entry[0], str)
+                    for key in task.keys():
+                        if isinstance(key, str):
+                            if key == entry[0]:
+                                task = task[key]
+                                entry = entry[1:]
+                                break
+                        else:
+                            if key.group == entry[0]:
+                                task = task[key]
+                                entry = entry[1:]
+                                break
+                for key in task.keys():
+                    if isinstance(key, str):
+                        if key == entry[0]:
+                            #print("    DELETE:", entry[0])
+                            del task[key]
+                            break
+                    else:
+                        if key.group == entry[0]:
+                            #print("    DELETE:", entry[0])
+                            del task[key]
+                            break
+                #del eval_task_dict[entry]
+            # TODO: do we now also have to delete possibly empty task groups?
+
+            def debug_task_dict(name, task, key_prefix):
+                if isinstance(task, dict):
+                    for subtask_name, subtask in task.items():
+                        debug_task_dict(subtask_name, subtask, key_prefix + [name.group])
+                else:
+                    print(key_prefix, name)
+                    for split, dataset in task.dataset.items():
+                        print(split, (dataset if dataset is None else len(dataset)))
+            
+            #print("DEBUG batch_task_dict")
+            #for k, v in batch_task_dict.items():
+            #    debug_task_dict(k, v, [])
 
             # execute control_tasks with data for this batch
             if not empty:
@@ -384,6 +522,8 @@ class Evaluator:
                 duration = time.perf_counter() - start_time
 
                 # clean data again for next split
+                # TODO: Why did I add this delete code? Doesnt batch_task_dict just go out of scope and replaced with a new deepcopy?
+                '''
                 for task_name, task in self.control_task_dict.items():
                     if isinstance(task, dict):
                         for subtask_name, subtask in task.items():
@@ -394,6 +534,7 @@ class Evaluator:
                         for split, boundary in self.batch_split_sizes[batch_id][(task_name, None)].items():
                             if boundary:
                                 del batch_task_dict[task_name].dataset[split]
+                '''
 
                 def nan_to_numpy_nan(d):
                     if isinstance(d, dict):

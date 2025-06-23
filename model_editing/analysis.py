@@ -1,5 +1,6 @@
 import pandas as pd
 import numpy as np
+import copy
 from tqdm import tqdm
 from itertools import product
 from collections import defaultdict
@@ -153,17 +154,90 @@ class EvalResult():
     @staticmethod
     def extrtact_metrics_from_control_result(doc):
         full_metrics = dict()
-        # print(doc)
-        for task in doc["results"].keys():
-            if doc["results"][task] is None:
-                continue
-            higher_is_better = doc["higher_is_better"][task]
-            data = doc["results"][task]
-            del data["alias"]
-            metric_names = [m for m in data.keys() if "stderr" not in m]
-            metrics = {metric_name.replace(",none", ""): {"score": data[metric_name], "std_err": data[metric_name.replace(",", "_stderr,")], "n-samples": doc["n-samples"][task]["effective"], "higher_is_better": higher_is_better[metric_name.replace(",none", "")]} for metric_name in metric_names}
-            full_metrics[task] = metrics
+
+        def debug_doc(d):
+            for key, val in d.items():
+                if isinstance(val, dict):
+                    print(f"{key}:")
+                    for subkey, subval in val.items():
+                        print(f"    {subkey}: {subval}")
+                else:
+                    print(f"{key}: {val}")
+
+        #print("######## DEBUG DOC START ########")
+        #debug_doc(doc)
+        #print("######## DEBUG DOC END ########")
+
+        # create aggregation map
+        aggregation_map = defaultdict(set)
+        
+        def build_aggregation_map(group, hierarchy):
+            if group in doc["group_subtasks"] and doc["group_subtasks"][group] is not None and len(doc["group_subtasks"][group]) > 0:
+                for sub_group in doc["group_subtasks"][group]:
+                    build_aggregation_map(sub_group, hierarchy + [group])
+            else:
+                aggregation_map[group].update(hierarchy)
+
+        for group in doc["group_subtasks"]:
+            build_aggregation_map(group, [])
+        
+
+        #print("######## DEBUG AGGREGATION MAP START ########")
+        #for k, v in aggregation_map.items():
+        #    print(k, v)
+        #print("######## DEBUG AGGREGATION MAP END ########")
+
+        full_metrics = dict()
+        aggregate_metrics = dict()
+
+        for task, samples in doc["n-samples"].items():
+            if samples is not None:
+                n_samples = samples["effective"]
+                higher_is_better = doc["higher_is_better"][task]
+                data = doc["results"][task]
+                if "alias" in data:
+                    del data["alias"]
+                metric_names = [m for m in data.keys() if "stderr" not in m]
+                metrics = {metric_name.replace(",none", ""): {"score": data[metric_name], "std_err": data[metric_name.replace(",", "_stderr,")], "n-samples": n_samples, "higher_is_better": higher_is_better[metric_name.replace(",none", "")]} for metric_name in metric_names}
+                full_metrics[task] = metrics
+                for supergroup in aggregation_map[task]:
+                    print(f"DEBUG add to {supergroup} with metrics={metrics}")
+                    if supergroup in aggregate_metrics:
+                        for metric, result in metrics.items():
+                            aggregate_metrics[supergroup][metric]["score"] += (result["score"] * result["n-samples"])
+                            if result["std_err"] is not None:
+                                if aggregate_metrics[supergroup][metric]["std_err"] is not None:
+                                    aggregate_metrics[supergroup][metric]["std_err"] += result["std_err"] * result["n-samples"]
+                                else:
+                                    aggregate_metrics[supergroup][metric]["std_err"] = result["std_err"] * result["n-samples"]
+                            aggregate_metrics[supergroup][metric]["n-samples"] += result["n-samples"]
+                    else:
+                        _metrics = copy.deepcopy(metrics)
+                        for _, result in _metrics.items():
+                            result["score"] = result["score"] * result["n-samples"]
+                            if result["std_err"] is not None:
+                                result["std_err"] = result["std_err"] * metrics["n-samples"]
+                        aggregate_metrics[supergroup] = _metrics
+                    print(f"DEBUG aggregate_metrics[{supergroup}]={aggregate_metrics[supergroup]}")
+        
+        # compute aggregate results
+        for task, task_results in aggregate_metrics.items():
+            for metric_name, metric_results in task_results.items():
+                metric_results["score"] = metric_results["score"] / metric_results["n-samples"]
+                if metric_results["std_err"] is not None:
+                    metric_results["std_err"] = metric_results["std_err"] / metric_results["n-samples"]
+
+                if metric_name == "acc":
+                    print(f"My acc={metric_results['score']}, lm_eval acc={doc['results'][task]['acc,none']}")
+                    assert metric_results["score"] == doc["results"][task]["acc,none"]
+            full_metrics[task] = task_results
+        
+        #print("######## DEBUG EXTRACTED METRICS START ########")
+        #for k, v in full_metrics.items():
+        #    print(k, v)
+        #print("######## DEBUG EXTRACTED METRICS END ########")
         return full_metrics
+
 
     def load_aggregated_control_data(self, base_path):
         # for performance reasons we are aggregating the data while loading it
@@ -181,6 +255,9 @@ class EvalResult():
                 df = pd.read_parquet(path)
                 for _, row in tqdm(df.iterrows(), total=len(df), desc=f"Loading from path={path}"):
                     for task, metrics in EvalResult.extrtact_metrics_from_control_result(row).items():
+                        if metrics is None:
+                            assert task in row["group_subtasks"], "If its None at this point it must be an empty task group"
+                            continue
                         for metric, data in metrics.items():
                             key = (row["model"], row["editor"], task, metric)
 
@@ -193,7 +270,6 @@ class EvalResult():
                             aggregated_data[key]["batch_count"] += 1
                             aggregated_data[key]["eval_time"] += row["eval_time"]
                             aggregated_data[key]["higher_is_better"].add(data["higher_is_better"])
-
         self.aggregated_control_data = pd.DataFrame([
             {"model": k[0], "editor": k[1], "task": k[2], "metric": k[3], **v}
             for k, v in aggregated_data.items()

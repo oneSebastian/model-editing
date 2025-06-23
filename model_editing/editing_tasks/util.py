@@ -9,8 +9,7 @@ class Dataset():
         self.dataset_name = dataset_name
         self.examples = examples
     
-    def sample(self, k, seed):
-        random.seed(seed)
+    def sample(self, k):
         self.examples = random.sample(self.examples, min(k, len(self.examples)))
 
 
