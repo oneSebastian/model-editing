@@ -53,7 +53,7 @@ def apply_memit_to_model(
             if return_orig_weights and w_name not in weights_copy:
                 weights_copy[w_name] = w.detach().clone()
 
-            w[...] += upd_matrix.float()
+            w[...] += upd_matrix.float().to(w.device)
 
     #print(f"New weights successfully inserted into {list(deltas.keys())}")
 

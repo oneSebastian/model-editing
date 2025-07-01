@@ -48,6 +48,15 @@ class MEMITModel(EditModel):
 
         # TODO: adapt for sequential editing
         requests = [self._format_fact_for_rome(fact) for fact in facts]
+
+        #print("#### DEBUG edit_model START")
+        #assert len(facts) == len(requests)
+        #for i in range(len(facts)):
+        #    print(f"fact {i+1}:")
+        #    print(f"    fact={facts[i].to_dict()}")
+        #    print(f"    request={requests[i]}")
+        #print("#### DEBUG edit_model END")
+
         if self._model_name == "gpt-j":
             hparams = MEMITHyperParams.from_json(f'model_editing/model_editor/rome_style/hparams/MEMIT/EleutherAI_gpt-j-6B.json')
         else:

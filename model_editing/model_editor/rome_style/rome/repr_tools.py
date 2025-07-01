@@ -63,8 +63,10 @@ def get_words_idxs_in_templates(
     # Pre-process tokens
     for i, prefix in enumerate(prefixes):
         if len(prefix) > 0:
-            assert prefix[-1] == " "
-            prefix = prefix[:-1]
+            # TODO: When we apply a chat template the prefix doesnt always end in " ". But if we remove the trailing space, that shouldnt be a problem?
+            #assert prefix[-1] == " "
+            if prefix[-1] == " ":
+                prefix = prefix[:-1]
 
             prefixes[i] = prefix
             words[i] = f" {words[i].strip()}"
@@ -80,14 +82,14 @@ def get_words_idxs_in_templates(
         batch_tok[i : i + n] for i in range(0, n * 3, n)
     ]
 
-    #print("START DEBUG get_words_idxs_in_templates")
+    #print("#### DEBUG get_words_idxs_in_templates START")
     #for i, _toks in enumerate([prefixes_tok, words_tok, suffixes_tok]):
-    #    print(f"    i={i}")
-    #    for tokens in _toks:
+    #    print(f"i={i}")
+    #    for j, tokens in enumerate(_toks):
     #        if tokens:
-    #            print(f"tokens[0]={tokens[0]}, tok.pad_token_id={tok.pad_token_id}")
-    #            print(f"tokens={tokens}, decoded={tok.decode(tokens)}")
-    #print("END DEBUG get_words_idxs_in_templates")
+    #            print(f"    j={j}, tokens[0]={tokens[0]}, tok.pad_token_id={tok.pad_token_id}")
+    #            print(f"    tokens={tokens}, decoded={tok.decode(tokens)}")
+    #print("#### DEBUG get_words_idxs_in_templates END")
 
     if isinstance(tok, LlamaTokenizer) or isinstance(tok, LlamaTokenizerFast):
         words_tok = [tokens[1:] if tokens[0] == 29871 else tokens for tokens in words_tok]

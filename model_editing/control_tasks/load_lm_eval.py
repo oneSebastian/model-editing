@@ -81,7 +81,7 @@ def load_control_task_dict(control_tasks, editing_tasks):
         task_manager,
     )
 
-    # copy task datasets
+    # copy task datasets and set num_fewshot to 0
     task_data = dict()
 
     def copy_task_data(name, task, key_prefix):
@@ -92,6 +92,7 @@ def load_control_task_dict(control_tasks, editing_tasks):
             assert isinstance(task, ConfigurableTask)
             detached_copy = detached_dataset_copy(task.dataset)
             task_data[tuple(key_prefix + [name])] = detached_copy
+            task.num_fewshot = 0
     
     for _name, _task in task_dict.items():
         copy_task_data(_name, _task, [])
@@ -117,6 +118,13 @@ def load_control_task_dict(control_tasks, editing_tasks):
                 for split in splits
             })
     
+    print("DEBUG task dict prior to dataset removal")
+    for k, v in task_dict.items():
+        print(f"##### TASK {k} ####")
+        print(v)
+        print("\n\n")
+    exit()
+
     for _name, _task in task_dict.items():
         remove_task_dataset(_name, _task, [])
 
