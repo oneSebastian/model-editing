@@ -14,16 +14,15 @@ from .control_tasks.load_lm_eval import load_control_task_dict
 from .editing_tasks.util import QueryType
 
 
-def load_dataset(dataset_base_path, editing_task, split=None, sample_size=None, force_query_type=None, dev_split=False):
-    limit = sample_size if sample_size else 0
+def load_dataset(dataset_base_path, editing_task, split=None, force_query_type=None, dev_split=False):
     if editing_task == "RippleEdits":
-        dataset = RippleEditsDataset.from_file(f"{dataset_base_path}/RippleEdits/", split=split, limit=limit, force_query_type=force_query_type, dev_split=dev_split)
+        dataset = RippleEditsDataset.from_file(f"{dataset_base_path}/RippleEdits/", split=split, force_query_type=force_query_type, dev_split=dev_split)
     elif editing_task == "MQuAKE":
-        dataset = MQuAKEDataset.from_file(f"{dataset_base_path}/MQuAKE/", split=split, limit=limit, force_query_type=force_query_type, dev_split=dev_split)
+        dataset = MQuAKEDataset.from_file(f"{dataset_base_path}/MQuAKE/", split=split, force_query_type=force_query_type, dev_split=dev_split)
     elif editing_task == "CounterFact":
-        dataset = CounterFactDataset.from_file(f"{dataset_base_path}/CounterFact/", limit=limit, force_query_type=force_query_type, dev_split=dev_split)
+        dataset = CounterFactDataset.from_file(f"{dataset_base_path}/CounterFact/", force_query_type=force_query_type, dev_split=dev_split)
     elif editing_task == "zsRE":
-        dataset = ZSREDataset.from_file(f"{dataset_base_path}/zsRE/", limit=limit, force_query_type=force_query_type, dev_split=dev_split)
+        dataset = ZSREDataset.from_file(f"{dataset_base_path}/zsRE/", force_query_type=force_query_type, dev_split=dev_split)
     else:
         raise ValueError("This benchmark only supports the datasets RippleEdits, MQuAKE, CounterFact and zsRE.")
     return dataset
@@ -163,7 +162,7 @@ def benchmark_knowledge_editing(
         ("wnli", "validation"),
     ]
 
-    control_task_dict, control_task_data, control_data_boundaries = load_control_task_dict(control_tasks=control_tasks, editing_tasks=editing_tasks)
+    control_task_dict, control_task_data, control_data_boundaries = load_control_task_dict(control_tasks=control_tasks, editing_tasks=editing_tasks, dev_split=dev_split)
 
     '''
     def print_datasets(name, task, key_prefix):
@@ -184,7 +183,7 @@ def benchmark_knowledge_editing(
 
     for model_name, model_editor, editing_task in product(model_names, model_editors, editing_tasks):
         experiment_name = f"{model_name}_{model_editor}_{editing_task}_{edit_batch_size}{('_' + str(sample_size)) if sample_size else ''}"
-        dataset = load_dataset(dataset_base_path, editing_task, sample_size=sample_size, force_query_type=force_query_type, dev_split=dev_split)
+        dataset = load_dataset(dataset_base_path, editing_task, force_query_type=force_query_type, dev_split=dev_split)
         run_experiment(
             experiment_name=experiment_name,
             model_name=model_name,

@@ -1,4 +1,5 @@
 import json
+import random
 from typing import Optional
 from tqdm import tqdm
 from ..util import Dataset, Example, Fact, Query, TestCase, TestCondition, QueryType
@@ -65,24 +66,23 @@ class ZSREDataset(Dataset):
         )
 
     @staticmethod
-    def from_file(data_directory, force_query_type: Optional[QueryType]=None, limit=0, dev_split=False, dev_split_size=512):
+    def from_file(data_directory, force_query_type: Optional[QueryType]=None, dev_split=False, dev_split_size=512):
         with open(f"{data_directory}/zsre_mend_eval.json", 'r') as f:
             examples = json.load(f)
         example_list = []
-        if dev_split:
-            limit = dev_split_size
-        else:
-            if limit > 0:
-                limit += dev_split_size
         for i, example_data in tqdm(enumerate(examples), desc=f"Reading data from file: {data_directory}zsre_mend_eval.json"):
-            if not dev_split and i < dev_split_size:
-                continue
-            if limit and i >= limit:
-                break
             #if i % 100 == 0:
             #    print(f"Read {i} examples from file.", flush=True)
-            
             example = ZSREDataset.parse_example(i, example_data, force_query_type)
             example_list.append(example)
+        
+        # sample dev split or its complement
+        # use constant local seed for dev split creation
+        local_rng = random.Random(42)
+        local_rng.shuffle(example_list)
+        if dev_split:
+            example_list = example_list[:dev_split_size]
+        else:
+            example_list = example_list[dev_split_size:]
         return ZSREDataset("zsre", example_list)
 

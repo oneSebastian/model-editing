@@ -201,7 +201,7 @@ class EvalResult():
                 metrics = {metric_name.replace(",none", ""): {"score": data[metric_name], "std_err": data[metric_name.replace(",", "_stderr,")], "n-samples": n_samples, "higher_is_better": higher_is_better[metric_name.replace(",none", "")]} for metric_name in metric_names}
                 full_metrics[task] = metrics
                 for supergroup in aggregation_map[task]:
-                    print(f"DEBUG add to {supergroup} with metrics={metrics}")
+                    #print(f"DEBUG add to {supergroup} with metrics={metrics}")
                     if supergroup in aggregate_metrics:
                         for metric, result in metrics.items():
                             aggregate_metrics[supergroup][metric]["score"] += (result["score"] * result["n-samples"])
@@ -218,7 +218,7 @@ class EvalResult():
                             if result["std_err"] is not None:
                                 result["std_err"] = result["std_err"] * metrics["n-samples"]
                         aggregate_metrics[supergroup] = _metrics
-                    print(f"DEBUG aggregate_metrics[{supergroup}]={aggregate_metrics[supergroup]}")
+                    #print(f"DEBUG aggregate_metrics[{supergroup}]={aggregate_metrics[supergroup]}")
         
         # compute aggregate results
         for task, task_results in aggregate_metrics.items():

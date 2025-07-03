@@ -1,4 +1,5 @@
 import json
+import random
 from typing import Optional
 from tqdm import tqdm
 from ..util import Dataset, Example, Fact, Query, TestCase, TestCondition, QueryType
@@ -57,7 +58,7 @@ class MQuAKEDataset(Dataset):
         )
 
     @staticmethod
-    def from_file(data_directory, force_query_type: Optional[QueryType]=None, split=None, limit=0, dev_split=False, dev_split_size=512):
+    def from_file(data_directory, force_query_type: Optional[QueryType]=None, split=None, dev_split=False, dev_split_size=512):
         if split is None:
             dataset_name = "MQuAKE"
             split = "CF-3k-v2"
@@ -66,16 +67,16 @@ class MQuAKEDataset(Dataset):
         with open(f"{data_directory}/MQuAKE-{split}.json", 'r') as f:
             examples = json.load(f)
         example_list = []
-        if dev_split:
-            limit = dev_split_size
-        else:
-            if limit > 0:
-                limit += dev_split_size
         for i, example_data in tqdm(enumerate(examples), desc=f"Reading data from file: {data_directory}MQuAKE-{split}.json"):
-            if not dev_split and i < dev_split_size:
-                continue
-            if limit > 0 and i >= limit:
-                break
             example = MQuAKEDataset.parse_example(i, split, example_data, force_query_type)
             example_list.append(example)
+        
+        # sample dev split or its complement
+        # use constant local seed for dev split creation
+        local_rng = random.Random(42)
+        local_rng.shuffle(example_list)
+        if dev_split:
+            example_list = example_list[:dev_split_size]
+        else:
+            example_list = example_list[dev_split_size:]
         return MQuAKEDataset(dataset_name, example_list)

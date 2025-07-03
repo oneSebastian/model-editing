@@ -1,4 +1,5 @@
 import json
+import random
 from typing import Optional
 from tqdm import tqdm
 from ..util import Dataset, Example, Fact, Query, TestCase, TestCondition, QueryType
@@ -77,7 +78,7 @@ class RippleEditsDataset(Dataset):
             )
 
     @staticmethod
-    def from_file(data_directory, force_query_type: Optional[QueryType]=None, split=None, limit=0, dev_split=False, dev_split_size=512):
+    def from_file(data_directory, force_query_type: Optional[QueryType]=None, split=None, dev_split=False, dev_split_size=512):
         if split is None:
             dataset_name = "RippleEdits"
             splits = ["popular", "random", "recent"]
@@ -86,14 +87,6 @@ class RippleEditsDataset(Dataset):
             splits = [split]
         
         # load dataset
-        split_dev_limits = dict()
-        for split in splits:
-            split_dev_limits[split] = dev_split_size // len(splits)
-        split_dev_limits[splits[0]] += dev_split_size % len(splits)
-        split_limits = dict()
-        for split in splits:
-            split_limits[split] = limit // len(splits) if limit > 0 else 0
-        split_limits[splits[0]] += limit % len(splits)
 
         example_list = []
         example_id = 0
@@ -102,14 +95,6 @@ class RippleEditsDataset(Dataset):
                 examples = json.load(f)
             for i, example_data in tqdm(enumerate(examples), desc=f"Reading data from file: {data_directory}extended_{split}.json"):
                 example_id += 1
-                if dev_split:
-                    if i >= split_dev_limits[split]:
-                        continue
-                else:
-                    if i < split_dev_limits[split]:
-                        continue
-                    elif i >= split_dev_limits[split] + split_limits[split]:
-                        continue
                 # print(f"dev_split={dev_split}, split={split}, example_id={example_id}, i={i}")
                 example = RippleEditsDataset.parse_example(example_id, split, example_data, force_query_type)
                 if example is None:
@@ -122,5 +107,14 @@ class RippleEditsDataset(Dataset):
                     continue
                 else:
                     example_list.append(example)
+        
+        # sample dev split or its complement
+        # use constant local seed for dev split creation
+        local_rng = random.Random(42)
+        local_rng.shuffle(example_list)
+        if dev_split:
+            example_list = example_list[:dev_split_size]
+        else:
+            example_list = example_list[dev_split_size:]
         return RippleEditsDataset(dataset_name, example_list)
     

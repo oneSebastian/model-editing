@@ -1,4 +1,5 @@
 import random
+import numpy as np
 from collections import defaultdict
 from typing import Dict, Tuple, Union, Callable
 from copy import deepcopy
@@ -22,7 +23,7 @@ def recursive_print(data, depth, step=4):
         print(f"{' ' * depth}{data}")
 
 
-def compute_task_boundaries(name, task, key_prefix, distribution_dict, task_boundaries=None):
+def compute_task_boundaries(name, task, key_prefix, distribution_dict, task_boundaries=None, dev_split=None):
     if isinstance(task, dict):
         for subtask_name, subtask in task.items():
             compute_task_boundaries(subtask_name, subtask, key_prefix + [name.group], distribution_dict, task_boundaries=task_boundaries)
@@ -45,13 +46,20 @@ def compute_task_boundaries(name, task, key_prefix, distribution_dict, task_boun
         for split in task.dataset.keys():
             if task_boundaries is None:
                 split_length = len(task.dataset[split])
+                data_start = 0
             else:
                 data_start, data_end = task_boundaries[tuple(key_prefix + [name])][split]
                 split_length = data_end - data_start
 
+            if name in ["lambada", "hellaswag"]:
+                assert task_boundaries is None
+                split_length = split_length // 2
+                if not dev_split:
+                    data_start = split_length
+
             chunk_size = split_length // num_filled_chunks
             remainder = split_length % num_filled_chunks
-            chunk_start = 0 if task_boundaries is None else data_start
+            chunk_start = data_start
             for i in range(num_filled_chunks):
                 chunk_end = chunk_start + chunk_size + (1 if i < remainder else 0)
                 if chunk_end > chunk_start:
@@ -70,9 +78,11 @@ def compute_task_boundaries(name, task, key_prefix, distribution_dict, task_boun
             '''
 
 
-def load_control_task_dict(control_tasks, editing_tasks):
+def load_control_task_dict(control_tasks, editing_tasks, dev_split=False):
     if not control_tasks:
         return None, None, None
+    
+    # TODO: For now we have implemented lm eval dev splits only for the tasks lambada and hellaswag
 
     assert all(isinstance(_, str) for _ in editing_tasks)
     task_manager = TaskManager()
@@ -90,6 +100,14 @@ def load_control_task_dict(control_tasks, editing_tasks):
                 copy_task_data(subtask_name, subtask, key_prefix + [name.group])
         else:
             assert isinstance(task, ConfigurableTask)
+            
+            for split, dataset in task.dataset.items():
+                dataset_len = len(dataset)
+                rng = np.random.RandomState(42)
+                perm = rng.permutation(dataset_len)
+                shuffled_dataset = dataset.select(perm.tolist())
+                task.dataset[split] = shuffled_dataset
+
             detached_copy = detached_dataset_copy(task.dataset)
             task_data[tuple(key_prefix + [name])] = detached_copy
             task.num_fewshot = 0
@@ -100,7 +118,7 @@ def load_control_task_dict(control_tasks, editing_tasks):
     # compute distributed task_boundaries
     edit_tasks_distribution_dict = {task: defaultdict(lambda: defaultdict(dict)) for task in editing_tasks}
     for _name, _task in task_dict.items():
-        compute_task_boundaries(_name, _task, [], edit_tasks_distribution_dict)
+        compute_task_boundaries(_name, _task, [], edit_tasks_distribution_dict, dev_split=dev_split)
     
 
     # remove dataset referneces from task_dict. Data is stored separately in task_data
@@ -118,12 +136,12 @@ def load_control_task_dict(control_tasks, editing_tasks):
                 for split in splits
             })
     
-    print("DEBUG task dict prior to dataset removal")
-    for k, v in task_dict.items():
-        print(f"##### TASK {k} ####")
-        print(v)
-        print("\n\n")
-    exit()
+    #print("DEBUG task dict prior to dataset removal")
+    #for k, v in task_dict.items():
+    #    print(f"##### TASK {k} ####")
+    #    print(v)
+    #    print("\n\n")
+    #exit()
 
     for _name, _task in task_dict.items():
         remove_task_dataset(_name, _task, [])
@@ -132,99 +150,3 @@ def load_control_task_dict(control_tasks, editing_tasks):
     return task_dict, task_data, edit_tasks_distribution_dict
 
 
-def old_load_control_task_dict(control_tasks, editing_tasks, target_splits=None):
-    if not control_tasks:
-        return None, None, None
-    
-    assert all(isinstance(_, str) for _ in editing_tasks)
-    task_manager = TaskManager()
-    print("DEBUG: run get_task_dict")
-    task_dict = get_task_dict(
-        control_tasks,
-        task_manager,
-    )
-    print("DEBUG: get_task_dict finished")
-    task_data = dict()
-
-    data_boundaries = {ke_task: defaultdict(dict) for ke_task in editing_tasks}
-    task_splits = len(editing_tasks)
-
-    def compute_boundaries(_task, _control_task, _subtask_name=None):
-        for split in _task.dataset.keys():
-            n = len(_task.dataset[split])
-            chunk_size = n // task_splits
-            remainder = n % task_splits
-            chunk_start = 0
-            for i, ke_task in enumerate(editing_tasks):
-                # split the control_tasks among the editing_tasks
-                chunk_end = chunk_start + chunk_size + (1 if i < remainder else 0)
-                data_boundaries[ke_task][(_control_task, _subtask_name)][split] = (chunk_start, chunk_end)
-                chunk_start = chunk_end
-
-    # delete all but the target dataset splits
-    delete_keys = []
-    for control_task, task in task_dict.items():
-        if isinstance(task, dict):
-            for subtask_name, subtask in task.items():
-                for split in subtask.dataset.keys():
-                    key = (control_task, subtask_name, split)
-                    if key not in target_splits:
-                        delete_keys.append(key)
-        else:
-            for split in task.dataset.keys():
-                key = (control_task, split)
-                if key not in target_splits:
-                    delete_keys.append(key)
-    for entry in delete_keys:
-            if len(entry) == 2:
-                del task_dict[entry[0]].dataset[entry[1]]
-            elif len(entry) == 3:
-                del task_dict[entry[0]][entry[1]].dataset[entry[2]]
-    
-    for control_task, task in task_dict.items():
-        if isinstance(task, dict):
-            for subtask_name, subtask in task.items():
-                task_data[(control_task, subtask_name)] = deepcopy(subtask.dataset)
-                compute_boundaries(_task=subtask, _control_task=control_task, _subtask_name=subtask_name)
-        else:
-            task_data[(control_task, None)] = deepcopy(task.dataset)
-            compute_boundaries(_task=task, _control_task=control_task)
-    
-    # clean data from task dict after it was separately saved
-    delete_keys = []
-    for control_task, task in task_dict.items():
-        if isinstance(task, dict):
-            for subtask_name, subtask in task.items():
-                for split in subtask.dataset.keys():
-                    key = (control_task, subtask_name, split)
-                    delete_keys.append(key)
-        else:
-            for split in task.dataset.keys():
-                key = (control_task, split)
-                delete_keys.append(key)
-    for entry in delete_keys:
-            if len(entry) == 2:
-                del task_dict[entry[0]].dataset[entry[1]]
-            elif len(entry) == 3:
-                del task_dict[entry[0]][entry[1]].dataset[entry[2]]
-    
-    
-    print("DEBUG load_control_eval task dict:")
-    for control_task, task in task_dict.items():
-        if isinstance(task, dict):
-            for subtask_name, subtask in task.items():
-                print(f"task={control_task}, subtask={subtask_name}, n_splits={len(subtask.dataset)}")
-        else:
-            print(f"task={control_task}, n_splits={len(task.dataset)}")
-    print("DEBUG load_control_eval data_dict entries:")
-    for key, value in task_data.items():
-        for split, data in value.items():
-            print("    ", key, split, len(data))
-    print("DEBUG load_control_eval data_boundaries:")
-    for ke_task, boundaries in data_boundaries.items():
-        for key, splits in boundaries.items():
-            for split, _ in splits.items():
-                print(f"ke_task={ke_task}, control_task={key}, split={split}, boundary={_}")
-    
-
-    return task_dict, task_data, data_boundaries

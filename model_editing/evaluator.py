@@ -106,25 +106,7 @@ class Evaluator:
 
         # create batch boundaries of datasets for lm_eval tasks
         if self.control_task_dict is not None:
-            # no longer needed?: self.lm_eval_batch_boundaries = dict()
             self.batch_split_sizes = {i: defaultdict(dict) for i in range(self.num_batches)}
-            
-            '''
-            def compute_lm_batch_boundaries(_task, _task_name, _subtask_name=None):
-                for split in self.control_task_data[(_task_name, _subtask_name)].keys():
-                    data_start, data_end = control_data_boundaries[(_task_name, _subtask_name)][split]
-                    n = data_end - data_start
-                    batch_size = n // self.num_batches
-                    remainder = n % self.num_batches
-                    batch_start = data_start
-                    for i in range(self.num_batches):
-                        batch_end = batch_start + batch_size + (1 if i < remainder else 0)
-                        if batch_end > batch_start:
-                            self.batch_split_sizes[i][(_task_name, _subtask_name)][split] = (batch_start, batch_end)
-                        else:
-                            self.batch_split_sizes[i][(_task_name, _subtask_name)][split] = None
-                        batch_start = batch_end
-            '''
 
             for name, task in self.control_task_dict.items():
                 assert control_data_boundaries is not None
