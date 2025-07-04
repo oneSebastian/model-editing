@@ -46,11 +46,25 @@ class ContextRetrieverModel(EditModel):
         self.edit_template_id = edit_template_id
         self.retrieve_k = retrieve_k
 
-        self.chat_template_beginning = "<s>[INST]"
-        if self.use_chat_template and self._model_name != "mistral_7B_instruct":
-            # TODO: generalise implementation
-            raise NotImplementedError("In context editing with chat template is currently only implemented for Mistral-7B-Instruct-v0.3. We have a hard coded assumption that the first user quers starts with \"<s>[INST]\"")
-
+        # get system context of chat template
+        if self.use_chat_template:
+            if self._model_name == "mistral_7B_instruct":
+                self.chat_template_beginning = "<s>[INST]"
+            elif self._model_name == "llama_3_8B_instruct":
+                conversation = [
+                    {"role": "system", "content": "{}"},
+                    ]
+                system_template = tokenizer.apply_chat_template(
+                    conversation,
+                    tokenize=False,
+                    add_generation_prompt=False,
+                )
+                self.chat_template_beginning = system_template[:system_template.find("{")]
+            else:
+                # TODO: generalise implementation
+                raise NotImplementedError("In context editing with chat template is currently only implemented for Mistral-7B-Instruct-v0.3 and meta-llama/Llama-3.1-8B-Instruct.")
+            
+            
         if self.log_path:
             with open(self.log_path, "a") as f:
                 f.write("Context retriever parameters:\n")
@@ -139,11 +153,12 @@ class ContextRetrieverModel(EditModel):
             elif edit_tokens.shape[-1] > max_edit_context:
                 edit_context = self.tokenizer.decode(edit_tokens[0][:max_edit_context])
             if self.use_chat_template:
-                assert request.arguments[0].startswith(self.chat_template_beginning), "For now we are assuming we're working with Mistral-7B-Instruvt-v0.3"
+                assert request.arguments[0].startswith(self.system_template_beginning)
                 prompt = self.chat_template_beginning + edit_context + request.arguments[0][len(self.chat_template_beginning):]
             else:
                 prompt = edit_context + request.arguments[0]
             request.arguments = (prompt,) + request.arguments[1:]
+            exit()
             
     def _edit_loglikelihood_requests(self, requests):
         # We may still need to apply the chat template and cannot return immediately
@@ -163,7 +178,7 @@ class ContextRetrieverModel(EditModel):
                         edit_context = self.tokenizer.decode(edit_tokens[0][:max_edit_context])
                     if self.use_chat_template:
                         #prompt, response = self.apply_chat_to_prompt_and_model_answer(edit_context + request.arguments[0], request.arguments[1])
-                        assert request.arguments[0].startswith(self.chat_template_beginning), f"For now we are assuming we're working with Mistral-7B-Instruvt-v0.3, request.arguments[0]={request.arguments[0]}"
+                        assert request.arguments[0].startswith(self.chat_template_beginning), f"request.arguments[0]={request.arguments[0]}"
                         prompt = self.chat_template_beginning + edit_context + request.arguments[0][len(self.chat_template_beginning):]
                         response = request.arguments[1]
                     else:
@@ -232,7 +247,7 @@ class ContextRetrieverModel(EditModel):
             if self.use_chat_template:
                 #arguments = self.apply_chat_to_prompt_and_model_answer(edit_context, request.arguments[0])
                 #response = request.arguments[1]
-                assert request.arguments[0].startswith(self.chat_template_beginning), "For now we are assuming we're working with Mistral-7B-Instruvt-v0.3"
+                assert request.arguments[0].startswith(self.chat_template_beginning)
                 arguments = (
                     self.chat_template_beginning + edit_context,
                     request.arguments[0][len(self.chat_template_beginning):]

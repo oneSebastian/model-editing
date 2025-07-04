@@ -226,9 +226,7 @@ class EvalResult():
                 metric_results["score"] = metric_results["score"] / metric_results["n-samples"]
                 if metric_results["std_err"] is not None:
                     metric_results["std_err"] = metric_results["std_err"] / metric_results["n-samples"]
-
                 if metric_name == "acc":
-                    print(f"My acc={metric_results['score']}, lm_eval acc={doc['results'][task]['acc,none']}")
                     assert metric_results["score"] == doc["results"][task]["acc,none"]
             full_metrics[task] = task_results
         

@@ -39,6 +39,7 @@ class QueryExecutor(HFLM):
         max_length: Optional[int] = None,
         device: Optional[str] = "cuda",
         dtype: Optional[Union[str, torch.dtype]] = "auto",
+        softmax_dtype: Optional[Union[str, torch.dtype]] = None,
         batch_size: Optional[Union[int, str]] = 1,
         max_batch_size: Optional[int] = 64,
         trust_remote_code: Optional[bool] = False,
@@ -96,6 +97,9 @@ class QueryExecutor(HFLM):
         self.batch_schedule = 1
         self.batch_sizes = {}
         self.max_batch_size = max_batch_size
+        self.softmax_dtype = (
+            get_dtype(softmax_dtype) if softmax_dtype is not None else None
+        )
 
         if str(batch_size).startswith("auto"):
             batch_size = batch_size.split(":")

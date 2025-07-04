@@ -51,7 +51,7 @@ def compute_task_boundaries(name, task, key_prefix, distribution_dict, task_boun
                 data_start, data_end = task_boundaries[tuple(key_prefix + [name])][split]
                 split_length = data_end - data_start
 
-            if name in ["lambada", "hellaswag"]:
+            if dev_split is not None and name in ["lambada", "hellaswag"]:
                 assert task_boundaries is None
                 split_length = split_length // 2
                 if not dev_split:
