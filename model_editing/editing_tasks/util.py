@@ -24,9 +24,10 @@ class QueryType(Enum):
 
 
 class Query:
-    def __init__(self, prompt: str, answers: list[str], query_type: QueryType, answer_options: Optional[list] = None, phrase: Optional[str] = None):
+    def __init__(self, query_id: tuple, prompt: str, answers: list[str], query_type: QueryType, answer_options: Optional[list] = None, phrase: Optional[str] = None):
         # TODO: then I can remove some redundant information?
         assert prompt == phrase or phrase is None, f"DEBUG phrase: prompt={prompt}, answers={answers}, phrase={phrase}"
+        self.query_id = query_id # tuple(example_id, test_case_id)
         self.prompt = prompt
         self.answers = answers
         self.answer_options = answer_options
@@ -36,6 +37,7 @@ class Query:
     
     def to_dict(self):
         return {
+            "query_id": self.query_id,
             "prompt": self.prompt,
             "answers": self.answers,
             "answer_options": self.answer_options,
@@ -43,7 +45,7 @@ class Query:
         }
     
     @staticmethod
-    def from_dict(query_dict: dict, query_type: QueryType):
+    def from_dict(query_dict: dict, query_type: QueryType, example_id: int, test_case_id: int):
         answer_candidates = [[answer["value"]] + answer["aliases"] for answer in query_dict["answers"]]
         all_answers = []
         for answer in answer_candidates:
@@ -57,6 +59,7 @@ class Query:
             return None
         else:
             return Query(
+                    query_id=(example_id, test_case_id),
                     prompt=query_dict["prompt"],
                     answers = all_answers,
                     query_type=query_type,
@@ -68,7 +71,8 @@ class Query:
 
 
 class Fact:
-    def __init__(self, prompt: str, subject: str, target: str, original_target: str, fact_query: Query,  question: Optional[str] = None):
+    def __init__(self, example_id: int, prompt: str, subject: str, target: str, original_target: str, fact_query: Query,  question: Optional[str] = None):
+        self.example_id = example_id
         self.prompt = prompt
         self.subject = subject
         self.target = target
@@ -78,6 +82,7 @@ class Fact:
     
     def to_dict(self):
         return {
+            "fact_example_id": self.example_id,
             "prompt": self.prompt,
             "subject": self.subject,
             "target": self.target,

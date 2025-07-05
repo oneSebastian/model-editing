@@ -12,11 +12,13 @@ class ZSREDataset(Dataset):
     @staticmethod
     def parse_example(example_id: int, data_dict: dict, force_query_type: Optional[QueryType]):
         fact = Fact(
+                example_id = example_id,
                 prompt = data_dict["src"],
                 subject = data_dict["subject"],
                 target = data_dict["answers"][0],
                 original_target = None,
                 fact_query = Query(
+                    query_id = (example_id, -1),
                     prompt = data_dict["src"],
                     answers = data_dict["answers"],
                     query_type=QueryType.ARG if force_query_type is None else force_query_type,
@@ -29,6 +31,7 @@ class ZSREDataset(Dataset):
                     test_dimension = "efficacy",
                     test_condition = TestCondition.OR,
                     test_queries = [Query(
+                        query_id = (example_id, 0),
                         prompt = data_dict["src"],
                         answers = data_dict["answers"],
                         query_type=QueryType.ARG if force_query_type is None else force_query_type,
@@ -40,6 +43,7 @@ class ZSREDataset(Dataset):
                     test_dimension = "paraphrase",
                     test_condition = TestCondition.OR,
                     test_queries = [Query(
+                        query_id = (example_id, 1),
                         prompt = data_dict["rephrase"],
                         answers = data_dict["answers"],
                         query_type=QueryType.ARG if force_query_type is None else force_query_type,
@@ -51,6 +55,7 @@ class ZSREDataset(Dataset):
                     test_dimension = "neighborhood",
                     test_condition = TestCondition.OR,
                     test_queries = [Query(
+                        query_id = (example_id, 2),
                         prompt = data_dict["loc"].replace("nq question: ", "") + "?",
                         answers = [data_dict["loc_ans"]],
                         query_type=QueryType.ARG if force_query_type is None else force_query_type,

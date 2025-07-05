@@ -44,6 +44,15 @@ class EvalResult():
                     result[key] = result.get(key, 0) + (value if value is not None else 0)
             return result
 
+        def mean_dicts(dicts):
+            counts = {}
+            totals = {}
+            for d in dicts:
+                for key, value in d.items():
+                    totals[key] = totals.get(key, 0.0) + (value if value is not None else 0.0)
+                    counts[key] = counts.get(key, 0.0) + 1.0
+            return {key: totals[key] / counts[key] if counts[key] > 0.0 else 0.0 for key in totals}
+
         def divide_dict(d, divisor):
             return {k: v / divisor for k, v in d.items()} if divisor != 0 else {k: 0 for k in d}
         
@@ -53,14 +62,13 @@ class EvalResult():
             'verify_test_case_time': 'sum',
             'edit_time': 'sum',
             'eval_time': 'sum',
-            'accuracy': (lambda x: sum_dicts(x)) if evaluate_generate_lengths else 'sum',
+            'accuracy': (lambda x: mean_dicts(x)) if evaluate_generate_lengths else 'mean',
             'valid_test_case_ratio': 'mean',
             'experiment_count': 'sum',
         })
-        if evaluate_generate_lengths:
-            df["accuracy"] = df.apply(lambda row: divide_dict(row["accuracy"], row["valid_test_cases"]), axis=1)
-        else:
-            df["accuracy"] = df["accuracy"] / df["valid_test_cases"]
+        # we're aggregating accuracies that have already been aggregated over all test cases belonging to a given example,
+        #    but not weighing them by the number of test cases for this example (and dimension)
+        
         
         if not groupby_dimensions:
             aggregate_by.remove("dimension")
@@ -70,87 +78,14 @@ class EvalResult():
                 'verify_test_case_time': 'sum',
                 'edit_time': 'sum',
                 'eval_time': 'sum',
-                'accuracy': (lambda x: sum_dicts(x)) if evaluate_generate_lengths else 'mean',
+                'accuracy': (lambda x: mean_dicts(x)) if evaluate_generate_lengths else 'mean',
                 'valid_test_case_ratio': 'mean',
                 'experiment_count': 'sum',
             })
 
         self.aggregated_editing_data = df
         return
-        '''
-        if evaluate_generate_lengths:
-            df_plot = pd.DataFrame(columns=["editor", "dataset", "x", "y"])
-            for index, row in df.iterrows():
-                for k, v in row["accuracy"].items():
-                    data = {
-                        "editor": f"{index[1]}",
-                        "dataset": f"{index[2]}",
-                        "x": int(k),
-                        "y": v,
-                    }
-                    if data["editor"] != "no-edit":
-                        df_plot.loc[len(df_plot)] = data
-            df_plot = df_plot.sort_values(by="x")
-
-            # Plot with Plotly Express
-            #fig = px.line(df_plot, x="x", y="y", color="group", markers=False,
-            #            labels={"x": "Generate Length", "y": "KE Accuracy", "group": "Group"},
-            #            title="KE Accuracy per Group")
-            #fig.write_image("visualisations/generate_length.png", width=2400, height=1800)
-            if groupby_dimensions:
-                dimensions = ["attribute", "neighborhood", "default", "fact_queries", "Subject_Aliasing", "Relation_Specificity", "paraphrase", "Logical_Generalization", "Compositionality_II", "Compositionality_I", "Forgetfulness"]
-            else:
-                dimensions = ["MQuAKE", "RippleEdits", "zsre", "CounterFact"]
-            
-            editor_colors = {}
-            color_palette = px.colors.qualitative.Set1
-
-            color_map = {
-                "context-retriever": "blue",
-                "in-context": "green",
-                "memit": "red",
-                "no-edit": "grey"
-            }
-
-            fig = make_subplots(rows=2, cols=2, horizontal_spacing=0.1, vertical_spacing=0.1, subplot_titles=dimensions)
-            for idx, dimension in enumerate(dimensions):
-                filtered_df = df_plot[df_plot["dataset"] == dimension]
-
-                for editor in filtered_df["editor"].unique():
-                    if editor not in editor_colors:
-                        editor_colors[editor] = color_palette[len(editor_colors) % len(color_palette)]
-                    show_legend = (idx == 0)
-                    group_df = filtered_df[filtered_df["editor"] == editor]
-                    row, col = divmod(idx, 2)  # Get row and column index
-                    fig.add_trace(
-                        go.Scatter(x=group_df["x"], y=group_df["y"], mode="lines", name=editor, line=dict(color=editor_colors[editor]), showlegend=show_legend),
-                        row=row + 1, col=col + 1
-                    )
-
-            fig.update_xaxes(title_text="Generate Length", row=2, col=1)
-            fig.update_xaxes(title_text="Generate Length", row=2, col=2)
-            fig.update_yaxes(title_text="KE Accuracy", row=1, col=1)
-            fig.update_yaxes(title_text="KE Accuracy", row=2, col=1)
-            fig.update_xaxes(showticklabels=False, row=1, col=1)
-            fig.update_xaxes(showticklabels=False, row=1, col=2)
-            #fig.update_yaxes(showticklabels=False, row=1, col=2)
-            #fig.update_yaxes(showticklabels=False, row=2, col=2)
-
-            fig.update_layout(
-                title="KE Accuracy per Group",
-                legend=dict(
-                    orientation="h",
-                    yanchor="bottom",
-                    y=-0.2,
-                    xanchor="center",
-                    x=0.5
-                ),
-                margin=dict(l=10, r=10, t=60, b=40),
-                meta=dict(mathjax=False),
-            )
-            fig.write_image("visualisations/generate_length/subplots.pdf", width=450, height=450, engine="kaleido")
-        '''
-    
+        
     @staticmethod
     def extrtact_metrics_from_control_result(doc):
         full_metrics = dict()

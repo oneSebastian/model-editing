@@ -46,6 +46,9 @@ def run_experiment(
         device,
         save_path,
         dev_split,
+        retriever_type,
+        retrieve_k,
+        retriever_embedding_model,
 ):
     print(f"Run experiment: {experiment_name}", flush=True)
     evaluator = Evaluator(
@@ -65,6 +68,9 @@ def run_experiment(
         save_path=save_path,
         device=device,
         dev_split=dev_split,
+        retriever_type=retriever_type,
+        retrieve_k=retrieve_k,
+        retriever_embedding_model=retriever_embedding_model,
     )
 
     # run evaluation for this experiment
@@ -114,6 +120,9 @@ def benchmark_knowledge_editing(
     dataset_base_path: str,
     save_path: str,
     device: str,
+    retriever_type: str,
+    retrieve_k: int,
+    retriever_embedding_model: str,
     random_seed: int = 42,
 ):
     # seed random
@@ -202,6 +211,9 @@ def benchmark_knowledge_editing(
             device=device,
             save_path=save_path,
             dev_split=dev_split,
+            retriever_type=retriever_type,
+            retrieve_k=retrieve_k,
+            retriever_embedding_model=retriever_embedding_model,
         )
 
         

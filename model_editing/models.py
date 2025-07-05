@@ -52,8 +52,8 @@ def load_model(model_name, device="cuda"):
     elif model_name == "llama_3_8B_instruct":
         tokenizer = AutoTokenizer.from_pretrained("meta-llama/Llama-3.1-8B-Instruct")
         tokenizer.pad_token = tokenizer.eos_token
-        #model = AutoModelForCausalLM.from_pretrained("meta-llama/Llama-3.1-8B-Instruct", device_map=None, pad_token_id=tokenizer.eos_token_id).to(device)
-        model = AutoModelForCausalLM.from_pretrained("meta-llama/Llama-3.1-8B-Instruct", device_map="auto", pad_token_id=tokenizer.eos_token_id)
+        model = AutoModelForCausalLM.from_pretrained("meta-llama/Llama-3.1-8B-Instruct", device_map=None, pad_token_id=tokenizer.eos_token_id).to(device)
+        #model = AutoModelForCausalLM.from_pretrained("meta-llama/Llama-3.1-8B-Instruct", device_map="auto", pad_token_id=tokenizer.eos_token_id)
     elif model_name == "llama_8B_instruct":
         tokenizer = AutoTokenizer.from_pretrained("meta-llama/Llama-3.1-8B-Instruct")
         tokenizer.pad_token = tokenizer.eos_token

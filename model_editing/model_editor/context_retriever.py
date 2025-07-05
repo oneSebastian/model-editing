@@ -1,5 +1,8 @@
 from typing import Dict, List, Literal, Optional, Tuple, Union
+from enum import Enum
 from math import ceil
+from rank_bm25 import BM25Okapi
+from nltk.tokenize import word_tokenize
 from transformers import (
     AutoModel,
     AutoTokenizer,
@@ -8,10 +11,18 @@ from transformers import (
     PreTrainedModel,
 )
 import torch
+import random
+import numpy as np
 from lm_eval.api.instance import Instance
 from lm_eval.models.huggingface import HFLM
 from .util import EditModel
 from ..queryexecutor import QueryExecutor
+
+
+class RetrieverType(Enum):
+    embedding = "embedding"
+    oracle = "oracle"
+    bm25 = "bm25"
 
 
 class ContextRetrieverModel(EditModel):
@@ -25,8 +36,9 @@ class ContextRetrieverModel(EditModel):
         edit_template_id: Union[bool, str]=1,
         verbose: bool=False,
         log_path: Optional[str]=None,
+        retriever_embedding_model: str="facebook/contriever-msmarco",
+        retriever_type: str="embedding",
         retrieve_k: int=4,
-        embedding_model: str="facebook/contriever-msmarco",
     ):
         QueryExecutor.__init__(
             self,
@@ -39,12 +51,27 @@ class ContextRetrieverModel(EditModel):
             verbose=verbose,
             log_path=log_path
         )
-        self.embedding_model = AutoModel.from_pretrained(embedding_model).to(self._device)
-        self.embedding_tokenizer = AutoTokenizer.from_pretrained(embedding_model)
+        self.accumulate_accuracy = True # set to False during execution of control tasks and condition queries
+        self.retriever_accuracies= []
         self.edit_facts = []
         self.fact_embeddings = None
         self.edit_template_id = edit_template_id
         self.retrieve_k = retrieve_k
+        self.retriever_type = RetrieverType(retriever_type)
+        self.e5_format = False
+
+        if self.retriever_type is RetrieverType.embedding:
+            self.embedding_model = AutoModel.from_pretrained(retriever_embedding_model).to(self._device)
+            self.embedding_tokenizer = AutoTokenizer.from_pretrained(retriever_embedding_model)
+            if retriever_embedding_model == "intfloat/multilingual-e5-large":
+                self.e5_format = True
+        elif self.retriever_type is RetrieverType.oracle:
+            self.embedding_model = AutoModel.from_pretrained(retriever_embedding_model).to(self._device)
+            self.embedding_tokenizer = AutoTokenizer.from_pretrained(retriever_embedding_model)
+        elif self.retriever_type is RetrieverType.bm25:
+            pass
+        else:
+            raise NotImplementedError(f"{self.retriever_type} is not a supported retriever type")
 
         # get system context of chat template
         if self.use_chat_template:
@@ -69,9 +96,12 @@ class ContextRetrieverModel(EditModel):
             with open(self.log_path, "a") as f:
                 f.write("Context retriever parameters:\n")
                 f.write(f"    retrieve_k: {self.retrieve_k}\n")
-                f.write(f"    embedding_model: {embedding_model}\n")
+                f.write(f"    retriever_type: {self.retriever_type}\n")
+                f.write(f"    embedding_model: {retriever_embedding_model}\n")
                 f.write(f"    edit_template_id: {self.edit_template_id}\n")
 
+    def get_retriever_accuracy(self):
+        return sum(self.retriever_accuracies) / len(self.retriever_accuracies)
 
     def mean_pooling(self, token_embeddings, mask):
         token_embeddings = token_embeddings.masked_fill(~mask[..., None].bool(), 0.)
@@ -90,23 +120,64 @@ class ContextRetrieverModel(EditModel):
         all_embs = torch.vstack(all_embs)
         return all_embs
 
-    def retrieve_facts(self, query):
-        inputs = self.embedding_tokenizer([query], padding=True, truncation=True, return_tensors='pt').to(self._device)
-        with torch.no_grad():
-            outputs = self.embedding_model(**inputs)
-            query_emb = self.mean_pooling(outputs[0], inputs['attention_mask']).cpu()
-        sim = (query_emb @ self.fact_embeddings.T)[0]
-        knn = sim.topk(min(self.retrieve_k, sim.shape[0]), largest=True)
-        return knn.indices
+    def retrieve_facts(self, query, example_id):
+        gold_standard_facts = [i for i in range(len(self.edit_facts)) if self.edit_facts[i].example_id == example_id]
+        if self.retriever_type is RetrieverType.embedding or (self.retriever_type is RetrieverType.oracle and not self.accumulate_accuracy):
+            if self.e5_format:
+                query = "query: " + query
+            inputs = self.embedding_tokenizer([query], padding=True, truncation=True, return_tensors='pt').to(self._device)
+            with torch.no_grad():
+                outputs = self.embedding_model(**inputs)
+                query_emb = self.mean_pooling(outputs[0], inputs['attention_mask']).cpu()
+            sim = (query_emb @ self.fact_embeddings.T)[0]
+            knn = sim.topk(min(self.retrieve_k, sim.shape[0]), largest=True)
+            if self.accumulate_accuracy:
+                hits = [1 for id in gold_standard_facts if id in knn.indices]
+                self.retriever_accuracies.append(sum(hits) / len(gold_standard_facts))
+            return knn.indices
+        elif self.retriever_type is RetrieverType.oracle:
+            assert self.accumulate_accuracy
+            assert len(gold_standard_facts) > 0, "No query should be posed without a related fact."
+            self.retriever_accuracies.append(1)
+            # uncomment to get oracle only without fill k:
+            #return gold_standard_facts
+
+            # get knn to fill up retrieve_k
+            inputs = self.embedding_tokenizer([query], padding=True, truncation=True, return_tensors='pt').to(self._device)
+            with torch.no_grad():
+                outputs = self.embedding_model(**inputs)
+                query_emb = self.mean_pooling(outputs[0], inputs['attention_mask']).cpu()
+            sim = (query_emb @ self.fact_embeddings.T)[0]
+            knn = sim.topk(min(self.retrieve_k, sim.shape[0]), largest=True)
+            reserve = [i for i in knn.indices if i not in gold_standard_facts]
+            return (gold_standard_facts + reserve)[:self.retrieve_k]
+        elif self.retriever_type is RetrieverType.bm25:
+            tokenized_query = word_tokenize(query.lower())
+            scores = np.array(self.bm25_embeddings.get_scores(tokenized_query))
+            top_k_indices = np.argsort(scores)[::-1][:self.retrieve_k]
+            if self.accumulate_accuracy:
+                hits = [1 for id in gold_standard_facts if id in top_k_indices]
+                self.retriever_accuracies.append(sum(hits) / len(gold_standard_facts))
+            return top_k_indices
+        else:
+            raise NotImplementedError(f"{self.retriever_type} is not a supported retriever type")
 
     def edit_model(self, facts):
         self.edit_facts += facts
-        fact_statements = [f"{fact.prompt} {fact.target}." for fact in facts]
-        embs = self.get_sent_embeddings(fact_statements)
-        if self.fact_embeddings is not None:
-            self.fact_embeddings = torch.cat((self.fact_embeddings, embs), dim=0)
-        else:
-            self.fact_embeddings = embs
+        if self.retriever_type is RetrieverType.embedding or self.retriever_type is RetrieverType.oracle:
+            if self.e5_format:
+                fact_statements = [f"passage: {fact.prompt} {fact.target}." for fact in facts]
+            else:
+                fact_statements = [f"{fact.prompt} {fact.target}." for fact in facts]
+            embs = self.get_sent_embeddings(fact_statements)
+            if self.fact_embeddings is not None:
+                self.fact_embeddings = torch.cat((self.fact_embeddings, embs), dim=0)
+            else:
+                self.fact_embeddings = embs
+        elif self.retriever_type is RetrieverType.bm25:
+            fact_statements = [f"{fact.prompt} {fact.target}." for fact in facts]
+            tokenized_fact_statements = [word_tokenize(fact.lower()) for fact in fact_statements]
+            self.bm25_embeddings = BM25Okapi(tokenized_fact_statements)
 
     def get_edit_context(self, fact_sentences):
         if self.edit_template_id == 0:
@@ -123,10 +194,10 @@ class ContextRetrieverModel(EditModel):
         else:
             raise ValueError(f"{self.edit_template_id} is not a recognised edit context template id.")
 
-    def get_prompt_context(self, prompt):
-        if self.fact_embeddings is None:
+    def get_prompt_context(self, prompt, example_id=None):
+        if not self.edit_facts:
             return ""
-        fact_ids = self.retrieve_facts(prompt)
+        fact_ids = self.retrieve_facts(prompt, example_id=example_id)
         context_facts = [self.edit_facts[i] for i in fact_ids]
         context_fact_sentences = [f"{fact.prompt} {fact.target}." for fact in context_facts]
         return self.get_edit_context(context_fact_sentences)
@@ -146,19 +217,18 @@ class ContextRetrieverModel(EditModel):
             assert len(request.arguments) == 2 and isinstance(request.arguments[1], dict)
             argument_length = self.tokenizer.encode(request.arguments[0], return_tensors='pt').shape[-1]
             max_edit_context = context_window - argument_length - self.max_gen_toks
-            edit_context = self.get_prompt_context(request.arguments[0])
+            edit_context = self.get_prompt_context(request.arguments[0], example_id=request.idx)
             edit_tokens = self.tokenizer.encode(edit_context, return_tensors='pt')
             if max_edit_context <= 0:
                 edit_context = ""
             elif edit_tokens.shape[-1] > max_edit_context:
                 edit_context = self.tokenizer.decode(edit_tokens[0][:max_edit_context])
             if self.use_chat_template:
-                assert request.arguments[0].startswith(self.system_template_beginning)
+                assert request.arguments[0].startswith(self.chat_template_beginning)
                 prompt = self.chat_template_beginning + edit_context + request.arguments[0][len(self.chat_template_beginning):]
             else:
                 prompt = edit_context + request.arguments[0]
             request.arguments = (prompt,) + request.arguments[1:]
-            exit()
             
     def _edit_loglikelihood_requests(self, requests):
         # We may still need to apply the chat template and cannot return immediately
@@ -170,7 +240,7 @@ class ContextRetrieverModel(EditModel):
                 if isinstance(request.arguments[1], str):
                     total_argument_length = self.tokenizer.encode(request.arguments[0] + request.arguments[1], return_tensors='pt').shape[-1]
                     max_edit_context = context_window - total_argument_length
-                    edit_context = self.get_prompt_context(request.arguments[0])
+                    edit_context = self.get_prompt_context(request.arguments[0], example_id=request.idx)
                     edit_tokens = self.tokenizer.encode(edit_context, return_tensors='pt')
                     if max_edit_context <= 0:
                         edit_context = ""
@@ -195,7 +265,7 @@ class ContextRetrieverModel(EditModel):
                 assert isinstance(argument, str)
                 argument_length = self.tokenizer.encode(argument, return_tensors='pt').shape[-1]
                 max_edit_context = context_window - argument_length
-                edit_context = self.get_prompt_context(request.arguments[0])
+                edit_context = self.get_prompt_context(request.arguments[0], example_id=request.idx)
                 edit_tokens = self.tokenizer.encode(edit_context, return_tensors='pt')
                 if max_edit_context <= 0:
                     edit_context = ""
@@ -238,7 +308,7 @@ class ContextRetrieverModel(EditModel):
                 request.arguments = (self.tokenizer.decode(argument_tokens[0][-context_window:]),)
                 argument_length = context_window
             max_edit_context = context_window - argument_length
-            edit_context = self.get_prompt_context(request.arguments[0])
+            edit_context = self.get_prompt_context(request.arguments[0], example_id=request.idx)
             edit_tokens = self.tokenizer.encode(edit_context, return_tensors='pt')
             if max_edit_context <= 0 or not self.edit_facts:
                 edit_context = ""
@@ -271,7 +341,7 @@ class ContextRetrieverModel(EditModel):
         argmax_inputs = []
         context_window = self.model.config.max_position_embeddings
         for query in queries:
-            edit_context = self.get_prompt_context(query.prompt)
+            edit_context = self.get_prompt_context(query.prompt, example_id=query.query_id[0])
             if isinstance(query.answers[0], str):
                 answer = query.answers[0]
             else:

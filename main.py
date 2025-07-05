@@ -52,7 +52,10 @@ def evaluate(args):
         dev_split=args.dev_split,
         dataset_base_path = args.dataset_base_path,
         save_path = args.results_dir,
-        device=args.device
+        device=args.device,
+        retriever_type=args.retriever,
+        retrieve_k=int(args.retrieve_k),
+        retriever_embedding_model=args.retriever_embedding_model
     )
 
 

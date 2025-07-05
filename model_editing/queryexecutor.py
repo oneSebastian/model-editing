@@ -199,7 +199,7 @@ class QueryExecutor(HFLM):
                 request_type="generate_until",
                 doc=None,
                 arguments=(self.apply_chat_to_single_prompt(queries[i].prompt) if self.use_chat_template else queries[i].prompt, {"until": [self.tokenizer.eos_token]}),
-                idx=i,
+                idx=queries[i].query_id[0],
             ) for i in range(len(queries))
         ]
 
@@ -282,7 +282,7 @@ class QueryExecutor(HFLM):
                     request_type="loglikelihood",
                     doc=None,
                     arguments=(argument_prompt, argument_option),
-                    idx=i,
+                    idx=query.query_id[0],
                 ))
                 i += 1
         return requests

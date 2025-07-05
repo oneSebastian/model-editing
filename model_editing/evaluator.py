@@ -54,7 +54,6 @@ class Evaluator:
             dataset,
             dataset_sample_size=None,
             edit_batch_size=1,
-            sequential_editing=False,
             evaluate_generate_lengths=False,
             use_chat_template=False,
             edit_template_id=1,
@@ -63,6 +62,9 @@ class Evaluator:
             dev_split=False,
             hparams=None,
             device="cuda",
+            retriever_type="embedding",
+            retrieve_k=4,
+            retriever_embedding_model="facebook/contriever-msmarco",
             verbose=False,
             ):
         self.experiment_name = experiment_name
@@ -123,9 +125,22 @@ class Evaluator:
         elif self.editor_name == 'memit':
             self.lm = MEMITModel(model, model_name, tokenizer, batch_size=self.eval_batch_size, use_chat_template=self.use_chat_template, verbose=self.verbose, log_path=self.result_path + ".txt" if self.result_path else None)
         elif self.editor_name == 'in-context':
+            raise NotImplementedError("in context editor is not up to date anymore. Is it even a relevant baseline?")
             self.lm = InContextModel(model, model_name, tokenizer, batch_size=self.eval_batch_size, use_chat_template=self.use_chat_template, verbose=self.verbose, log_path=self.result_path + ".txt" if self.result_path else None)
         elif self.editor_name == 'context-retriever':
-            self.lm = ContextRetrieverModel(model, model_name, tokenizer, batch_size=self.eval_batch_size, use_chat_template=self.use_chat_template, edit_template_id=self.edit_template_id, verbose=self.verbose, log_path=self.result_path + ".txt" if self.result_path else None)
+            self.lm = ContextRetrieverModel(
+                model,
+                model_name,
+                tokenizer,
+                batch_size=self.eval_batch_size,
+                use_chat_template=self.use_chat_template,
+                edit_template_id=self.edit_template_id,
+                retriever_type=retriever_type,
+                retrieve_k=retrieve_k,
+                retriever_embedding_model=retriever_embedding_model,
+                verbose=self.verbose,
+                log_path=self.result_path + ".txt" if self.result_path else None
+            )
         elif self.editor_name == 'lora':
             self.lm = LORAModel(model, model_name, tokenizer, batch_size=self.eval_batch_size, use_chat_template=self.use_chat_template, verbose=self.verbose, external_hparams=self.hparams, log_path=self.result_path + ".txt" if self.result_path else None)
         else:
@@ -150,7 +165,11 @@ class Evaluator:
             raise NotImplementedError("For now only generate queries are supported as condition queries")
         
         # execute all condition queries for this batch
+        if self.editor_name == "context-retriever":
+            self.lm.accumulate_accuracy = False
         generate_results = self.lm.execute_generate_queries([q[1] for q in queries[QueryType.GEN]], answer_length=20, evaluate_generate_lengths=False)
+        if self.editor_name == "context-retriever":
+            self.lm.accumulate_accuracy = True
 
         # evaluate query results on a test case basis
         # TODO: allow for non-generate condition queries
@@ -311,7 +330,23 @@ class Evaluator:
                             accuracy = 1.0
                         else:
                             accuracy= 0.0
-                example_result.dimension_results[dimension].accuracy = accuracy
+                
+                if isinstance(accuracy, float):
+                    example_result.dimension_results[dimension].accuracy += accuracy
+                else:
+                    assert isinstance(accuracy, dict)
+                    for length, acc in accuracy.items():
+                        example_result.dimension_results[dimension].accuracy[length] += acc
+            # average dimension result accuracy sums over number of test_cases per dimension
+            for dimension in example_result.dimension_results:
+                accuracy = example_result.dimension_results[dimension].accuracy
+                if isinstance(accuracy, float):
+                    example_result.dimension_results[dimension].accuracy = accuracy / example_result.dimension_results[dimension].valid_test_cases
+                else:
+                    assert isinstance(accuracy, dict)
+                    for length, acc in accuracy.items():
+                        example_result.dimension_results[dimension].accuracy[length] = acc / example_result.dimension_results[dimension].valid_test_cases
+
         
         # record editing time results
         test_queries_time = time.perf_counter() - test_queries_start_time
@@ -494,6 +529,8 @@ class Evaluator:
 
             # execute control_tasks with data for this batch
             if not empty:
+                if self.editor_name == "context-retriever":
+                    self.lm.accumulate_accuracy = False
                 start_time = time.perf_counter()
                 results = evaluate(
                     lm=self.lm,
@@ -502,6 +539,8 @@ class Evaluator:
                     apply_chat_template=self.lm.use_chat_template,
                 )
                 duration = time.perf_counter() - start_time
+                if self.editor_name == "context-retriever":
+                    self.lm.accumulate_accuracy = True
 
                 # clean data again for next split
                 # TODO: Why did I add this delete code? Doesnt batch_task_dict just go out of scope and replaced with a new deepcopy?
@@ -630,6 +669,9 @@ class Evaluator:
             self.df_generate_lengths.to_parquet(self.result_path + '_generate_lengths')
         
         with open(self.result_path + '.txt', "a") as f:
+            if self.editor_name == "context-retriever":
+                # write our retriever accuracy
+                f.write(f"Retriever accuracy: {self.lm.get_retriever_accuracy()}\n")
             # write out evaluation time
             minutes, seconds = divmod(self.eval_time, 60)
             hours, minutes = divmod(minutes, 60)

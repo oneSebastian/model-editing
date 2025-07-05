@@ -12,11 +12,13 @@ class CounterFactDataset(Dataset):
     @staticmethod
     def parse_example(example_id: int, data_dict: dict, force_query_type, max_test_cases_by_dimension=5):
         fact = Fact(
+                example_id=example_id,
                 prompt = data_dict["requested_rewrite"]["prompt"].format(data_dict["requested_rewrite"]["subject"]),
                 subject = data_dict["requested_rewrite"]["subject"],
                 target = data_dict["requested_rewrite"]["target_new"]["str"],
                 original_target = data_dict["requested_rewrite"]["target_true"]["str"],
                 fact_query = Query(
+                    query_id=(example_id, -1),
                     prompt = data_dict["requested_rewrite"]["prompt"].format(data_dict["requested_rewrite"]["subject"]),
                     answers = [data_dict["requested_rewrite"]["target_new"]["str"]],
                     query_type=QueryType.MC if force_query_type is None else force_query_type,
@@ -35,6 +37,7 @@ class CounterFactDataset(Dataset):
                     test_dimension = dimension,
                     test_condition = TestCondition.OR,
                     test_queries = [Query(
+                        query_id = (example_id, test_case_id),
                         prompt = prompt,
                         answers = [data_dict["requested_rewrite"]["target_true"]["str"] if dimension == "neighborhood" else data_dict["requested_rewrite"]["target_new"]["str"]],
                         query_type=QueryType.MC if force_query_type is None else force_query_type,

@@ -10,7 +10,7 @@ class RippleEditsDataset(Dataset):
         super().__init__(dataset_name, examples)
 
     @staticmethod
-    def parse_example(i: int, split: str, data_dict: dict, force_query_type: Optional[QueryType]):
+    def parse_example(example_id: int, split: str, data_dict: dict, force_query_type: Optional[QueryType]):
         if "original_fact" in data_dict["edit"]:
             assert data_dict["edit"]["fact_prompt"] == data_dict["edit"]["fact_query"]["prompt"] == data_dict["edit"]["original_fact"]["fact_prompt"] == data_dict["edit"]["original_fact"]["fact_query"]["prompt"], "Changed answers should not affect the fact prompt."
         else:
@@ -22,11 +22,12 @@ class RippleEditsDataset(Dataset):
             original_target = None
 
         fact = Fact(
+            example_id,
             data_dict["edit"]["fact_prompt"],
             data_dict["edit"]["subject_label"],
             data_dict["edit"]["target_label"],
             original_target,
-            Query.from_dict(data_dict["edit"]["fact_query"], query_type=QueryType.GEN if force_query_type is None else force_query_type),
+            Query.from_dict(data_dict["edit"]["fact_query"], query_type=QueryType.GEN if force_query_type is None else force_query_type, example_id=example_id, test_case_id=-1),
         )
         if fact.query is None:
             #print("data_dict:", data_dict)
@@ -34,7 +35,7 @@ class RippleEditsDataset(Dataset):
             #print(fact.to_dict())
             #print("#" * 100)
             #print(data_dict["edit"]["fact_query"])
-            print(f"Skipping example {i} during loading because of no valid fact query.")
+            print(f"Skipping example {example_id} during loading because of no valid fact query.")
             #exit()
             return None
 
@@ -51,10 +52,10 @@ class RippleEditsDataset(Dataset):
                 else:
                     msg = f"test_condition must be OR or AND; {test_case_data['test_condition']} is not a valid value."
                     raise ValueError(msg)
-                test_queries = [Query.from_dict(query, query_type=QueryType.GEN if force_query_type is None else force_query_type) for query in test_case_data["test_queries"]]
+                test_queries = [Query.from_dict(query, query_type=QueryType.GEN if force_query_type is None else force_query_type, example_id=example_id, test_case_id=test_case_id) for query in test_case_data["test_queries"]]
                 test_queries = [query for query in test_queries if query is not None]
                 # RippleEdits condition queries are for now always treated as generate queries to ease comparability
-                condition_queries = [Query.from_dict(query, query_type=QueryType.GEN) for query in test_case_data["condition_queries"]]
+                condition_queries = [Query.from_dict(query, query_type=QueryType.GEN, example_id=example_id, test_case_id=test_case_id) for query in test_case_data["condition_queries"]]
                 condition_queries = [query for query in condition_queries if query is not None]
                 test_case = TestCase(
                     test_case_id=test_case_id,
@@ -70,7 +71,7 @@ class RippleEditsDataset(Dataset):
             return None
         else:
             return Example(
-                example_id=i,
+                example_id=example_id,
                 example_type=data_dict["example_type"],
                 facts=[fact],
                 test_cases=test_cases,

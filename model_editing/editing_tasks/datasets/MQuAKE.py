@@ -11,7 +11,7 @@ class MQuAKEDataset(Dataset):
 
     
     @staticmethod
-    def parse_example(id: int, split: str, data_dict: dict, force_query_type):
+    def parse_example(example_id: int, split: str, data_dict: dict, force_query_type):
         facts = []
         for fact_data in data_dict["requested_rewrite"]:
             fact_query_answers = [fact_data["target_new"]["str"]]
@@ -21,6 +21,7 @@ class MQuAKEDataset(Dataset):
                     break
             
             facts.append(Fact(
+                example_id = example_id,
                 prompt = fact_data["prompt"].replace("{}", fact_data["subject"]),
                 subject = fact_data["subject"],
                 target = fact_data["target_new"]["str"],
@@ -28,6 +29,7 @@ class MQuAKEDataset(Dataset):
                 fact_query = Query(
                     #prompt = fact_data["prompt"].replace("{}", fact_data["subject"]),
                     # seb, since test cases use question answer format I will do the same for fact queries
+                    query_id=(example_id, -1),
                     prompt=fact_data["question"],
                     answers = fact_query_answers,
                     query_type=QueryType.GEN if force_query_type is None else force_query_type,
@@ -37,6 +39,7 @@ class MQuAKEDataset(Dataset):
         test_queries = []
         for question in data_dict["questions"]:
             test_queries.append(Query(
+                query_id = (example_id, 0),
                 prompt = question,
                 answers = [data_dict["new_answer"]] + data_dict["new_answer_alias"],
                 query_type=QueryType.GEN if force_query_type is None else force_query_type,
